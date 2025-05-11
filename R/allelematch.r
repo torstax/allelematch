@@ -159,12 +159,25 @@ print.amDataset <- function(x, ...) {
    print(xPrint)
 }
 
+printMinComparableLoci <- function(method, minComparableLoci, lociCount, missingMethod) {
+  if (!is.null(minComparableLoci)) {
+    # Calculate the min number of loci that must be defined (i.e. XX, XY or YY rather than -99)
+    # in a comparison before the comparison is disqualified (by setting score=0)
+    minComparableLociPercent = round((minComparableLoci * 100) / lociCount)
+    cat(method, ": minComparableLoci=", minComparableLoci, " of ", lociCount, " (", minComparableLociPercent, "%)\n", sep="")
+  } else {
+    cat(method, ": minComparableLoci not set. Using missingMethod=", missingMethod, " for backwards compatibility. lociCount=", lociCount, "\n", sep="")
+  }
+}
+
+
 ##
 ## amMatrix()
-amMatrix <- function(amDatasetFocal, missingMethod=2) {
+amMatrix <- function(amDatasetFocal, missingMethod=2, minComparableLoci=NULL) {
   
   ## Check function call variables for validity
   if (class(amDatasetFocal) != "amDataset") stop("allelematch:  amDatasetFocal must be an object of class \"amDataset\";  use amDataset() first", call.=FALSE)
+  if (!is.null(minComparableLoci)) { printMinComparableLoci("amMatrix", minComparableLoci, ncol(amDatasetFocal$multilocus), missingMethod) }
   if (!(missingMethod %in% c(1,2))) stop("allelematch:  missingMethod must equal 1 or 2", call.=FALSE)
   
   ## Create variables from amDatasetFocal object
@@ -174,33 +187,11 @@ amMatrix <- function(amDatasetFocal, missingMethod=2) {
   genotypes[genotypes==amDatasetFocal$missingCode] <- NA
   
   
-  ## Empty data structure to store results
-  simMatrix <- matrix(, nrow=numGenotypes, ncol=numGenotypes)
-
   ## Determine allele similarity score
-  for (i in 1:numGenotypes) {
-    if (missingMethod > 0) {
-        
-        if (missingMethod==1) missingMultiplier <- 0.25
-        else missingMultiplier <- 0.5
-    
-        ## Treat missing data in either the focal or comparison genotype as a partial match except:
-        ##      When missingMethod=2 missing data matches perfectly with missing data
-        ##      When missingMethod=1 missing data matches partially with missing data
-        simMatrix[i,] <- as.double(rowSums(genotypes[rep(i, numGenotypes),]==genotypes, na.rm=TRUE) +
-                                                          rowSums(is.na(genotypes) * missingMultiplier) + sum(is.na(genotypes[i,]) * missingMultiplier))
-
-      }
-    else {
-        ## Treat missing data in the focal genotype, or missing data in the comparison genotype, or missing data matching in both as a match
-        ##simMatrix[i,] <- as.double(rowSums(genotypes[rep(i, numGenotypes),]==genotypes, na.rm=TRUE) +
-        ##                                                  rowSums(is.na(genotypes) | is.na(genotypes[i,])))
-        stop("allelematch:  missingMethod=0 is currently not implemented", call.=FALSE)
-      }
-  }
+  simMatrix <- amSimilarityScore(genotypes, minComparableLoci=minComparableLoci, missingMethod=missingMethod)
   
   ## Turn matches into a percent and make it a dissimilarity
-  dissimMatrix <- 1-(simMatrix/ncol(genotypes))
+  dissimMatrix <- 1-(simMatrix)
   
   ## Add labels to dissimilarity matrix
   dimnames(dissimMatrix) <- list(amDatasetFocal$index, amDatasetFocal$index)
@@ -210,15 +201,126 @@ amMatrix <- function(amDatasetFocal, missingMethod=2) {
   class(dissimMatrix) <- "amMatrix"
   return(dissimMatrix)
 }
+
+
+## amSimilarityScore()
+## Returns a similarity matris with a similarity score for every genotype match.
+##
+## In each genotype match, every matching allele (X=X and Y=Y) increases 
+## the similarity by 1 and each mismatch (X!=Y and Y!=X) increases similarity by 0. 
+##
+## Parameter missingMethod controls how allele positions with missing data 
+## affects similarity. 
+##
+## This parameter also effects how the average similarity scores
+## for each genotype comparison is calculated.
+## 
+## This calculation is done differently depending on the 
+##   - The number of comparable positions (positions without missing data) 
+##     in the current genotype matching (see missingMethod=0 below)
+##   - The total number of allele positions in the genotype 
+##     (see missingMethod 1 and 2 below).
+##
+## minComparableLoci : If this parameter is set, an
+##
+## missingMethod=0 increases similarity by 0 for any comparisons that does not 
+##  compare two valid data (X or Y as opposed to -99 or NA)
+##  
+##  The average is then calculated by dividing the accumulated similarity 
+##  by the number of allele positions that could be compared
+##  (rather than the total numbers of allele positions)
+##
+## missingMethod=1 and missingMethod=2 assigns none-zero similarity to matches that include missing data.
+## 
+##  The average is calculated by dividing by the total number of allele columns in the genotype.
+##
+##  Note that missingMethod==1 (=> missingMultiplier==0.5) matches the algorithm
+##  that is described in chapter 2.1, page 3, step 1 of the vignette at
+##  https://cran.r-project.org/web/packages/allelematch/vignettes/allelematchSuppDoc.pdf
+##
+amSimilarityScore <- function(focalGenotypes, comparisonGenotypes=focalGenotypes, minComparableLoci=NULL, missingMethod=NULL) {
+  startTime <- Sys.time() # This method is a hot-spot. Measure how log it takes to execute.
+
+  # Set parameter defaults:  
+  if (is.null(missingMethod)) {
+    if (is.null(minComparableLoci)) {
+      missingMethod=2 # This is for backwards compatibility
+    } else {
+      missingMethod=0 # minComparableLoci overrules missingMethod
+    }
+  }
+  if (!is.null(minComparableLoci)) { 
+    missingMethod=0 # TEMP for TEST: Always let minComparableLoci overrule missingMethod
+    minComparableAlleles = 2*minComparableLoci # We look for two different alleles (X and Y) in each locus
+  }
+  
+  
+  numFocalGenotypes      <- nrow(focalGenotypes)
+  numComparisonGenotypes <- nrow(comparisonGenotypes)
+
+  alleleCount <- ncol(focalGenotypes) # Number of alleles to compare
+  if (ncol(focalGenotypes) != ncol(comparisonGenotypes)) {
+    cat("allelematch: amSimilarityScore: Hmm. ncol(focalGenotypes)=", ncol(focalGenotypes), " != ncol(comparisonGenotypes)=", ncol(comparisonGenotypes), sep="")
+  }
+
+  ## Empty data structures to store results
+  simMatrix <- matrix(nrow=numFocalGenotypes, ncol=numComparisonGenotypes)
+  pairwiseMatches <- vector("list", numFocalGenotypes)
+
+  ## Determine allele similarity score, fastest version + counting NA after comparison
+  for (i in 1:numFocalGenotypes) {
+    # Compare the current row in focalGenotype with all rows in comparisonGenotypes:
+    focalGenotypeI<- focalGenotypes[rep(i, numComparisonGenotypes),] # Duplicate row i to compare it with all rows in comparisonGenotypes
+    comparedRows  <- focalGenotypeI==comparisonGenotypes # Change to TRUE where both are same, FALSE where different, NA where one or both are NA
+    sumsMatching  <- rowSums(comparedRows, na.rm=TRUE)   # Count the number of TRUE (but not FALSE or NA) in each comparedRow
+
+    if (missingMethod==0) {
+      # How many columns/alleles could be compared without any NA data?
+      sumsComparable  <- rowSums(!is.na(comparedRows)) # Count the number of TRUE and FALSE (but not NA) in each comparedRow.
+      # sumsComparableOk<- as.double(sumsComparable >= minComparableLoci)
+
+      # sumsMissing     <- rowSums(is.na(comparedRows)) # * missingMultiplier
+      # sumsMatching    <- sumsMatching + (sumsMissing*missingMultiplier)     # Assume positions with missing data to match ...
+      # sumsMatching    <- sumsMatching * sumsComparableOk # ... but disqualify any compared pair that doesn't have enough comparable values
+
+      simMatrix[i,]   <- as.double(sumsMatching) / sumsComparable      # Divide the number of matches by the number of comparable alleles (i.e. don't count alleles with missing data)
+      
+      if (!is.null(minComparableLoci)) {
+        # Disqualify any genotype pair comparison that doesn't have enough comparable values:
+        simMatrix[i,] <- replace(simMatrix[i,], sumsComparable < minComparableAlleles, 0)
+      }
+    } else {
+      # Calculate the similarity of comparisons with missing values:
+      if (missingMethod==1) missingMultiplier <- 0.25 else missingMultiplier <- 0.5
+      sumsMissing     <- rowSums(is.na(comparisonGenotypes) * missingMultiplier) + sum(is.na(focalGenotypes[i,]) * missingMultiplier)
+
+      simMatrix[i,]   <- as.double(sumsMatching + sumsMissing) / alleleCount
+      
+      if (!is.null(minComparableLoci)) {
+        # Disqualify any genotype pair comparison that doesn't have enough comparable values:
+        sumsComparable  <- rowSums(!is.na(comparedRows)) # Count the number of TRUE and FALSE (but not NA) in each comparedRow.
+        simMatrix[i,] <- replace(simMatrix[i,], sumsComparable < minComparableAlleles, 0)
+      }
+    }
+    
+  }
+
+  endTime <- Sys.time()
+  if (FALSE) cat("    amSimilarityScore:", numFocalGenotypes, "x", numComparisonGenotypes, "duration: ")
+  if (FALSE) print(endTime-startTime)
+  
+  return(simMatrix)
+}
 ##
 ## amPairwise()
-amPairwise <- function(amDatasetFocal, amDatasetComparison=amDatasetFocal, alleleMismatch=NULL, matchThreshold=NULL, missingMethod=2) {
-    
+amPairwise <- function(amDatasetFocal, amDatasetComparison=amDatasetFocal, alleleMismatch=NULL, matchThreshold=NULL, minComparableLoci=NULL, missingMethod=2) {
+  
     ## Check function call variables for validity
     if ((class(amDatasetFocal) != "amDataset") || (class(amDatasetComparison) != "amDataset")) {
-          stop("allelematch:  amDatasetFocal and amDatasetComparison must be an object of class \"amDataset\";  use amDataset() first", call.=FALSE)
+        stop("allelematch:  amDatasetFocal and amDatasetComparison must be an object of class \"amDataset\";  use amDataset() first", call.=FALSE)
     }
-    if (!(missingMethod %in% c(1,2))) stop("allelematch:  missingMethod must equal 1 or 2", call.=FALSE)
+    if (!is.null(minComparableLoci)) { printMinComparableLoci("amPairwise", minComparableLoci, ncol(amDatasetFocal$multilocus), missingMethod) }
+    if (!(missingMethod %in% c(1,2))) stop("allelematch:  missingMethod must equal 1 or 2(default)", call.=FALSE)
     
     ## More checking of input parameters
     if (sum(!(c(is.null(alleleMismatch), is.null(matchThreshold)))) != 1) {
@@ -235,6 +337,10 @@ amPairwise <- function(amDatasetFocal, amDatasetComparison=amDatasetFocal, allel
         alleleMismatch <- round((1-matchThreshold)*ncol(amDatasetFocal$multilocus),2)
     }
     else if (!is.null(alleleMismatch)) {
+        if ((alleleMismatch < 0) || (alleleMismatch > ncol(amDatasetFocal$multilocus))) {
+                # TODO: Guard against matchThreshold becoming negative!
+                # stop("allelematch:  alleleMismatch (", alleleMismatch, ") must be positive and smaller than the number of alleles (", ncol(amDatasetFocal$multilocus), ")", call.=FALSE)
+            }
         matchThreshold <- 1-(alleleMismatch/ncol(amDatasetFocal$multilocus))
         }
   
@@ -267,31 +373,16 @@ amPairwise <- function(amDatasetFocal, amDatasetComparison=amDatasetFocal, allel
     numComparisonGenotypes <- nrow(comparisonGenotypes)
     
     
-    ## Empty data structures to store results
-    simMatrix <- matrix(, nrow=numFocalGenotypes, ncol=numComparisonGenotypes)
+    ## Determine allele similarity score
+    #simMatrix <- matrix(nrow=numFocalGenotypes, ncol=numComparisonGenotypes)
+    simMatrix <- amSimilarityScore(focalGenotypes, comparisonGenotypes, minComparableLoci=minComparableLoci, missingMethod=missingMethod)
+
     pairwiseMatches <- vector("list", numFocalGenotypes)
   
-    ## Determine allele similarity score
+    ## Examine allele similarity score
     for (i in 1:numFocalGenotypes) {
-      if (missingMethod > 0) {
-          if (missingMethod==1) missingMultiplier = 0.25
-          else missingMultiplier <- 0.5
-      
-          ## Treat missing data in either the focal or comparison genotype as a partial match except:
-          ##      When missingMethod=2 missing data matches perfectly with missing data
-          ##      When missingMethod=1 missing data matches partially with missing data
-          simMatrix[i,] <- as.double(rowSums(focalGenotypes[rep(i, numComparisonGenotypes),]==comparisonGenotypes, na.rm=TRUE) +
-                                                          rowSums(is.na(comparisonGenotypes) * missingMultiplier) + sum(is.na(focalGenotypes[i,]) * missingMultiplier))
-      }
-      else {
-          ## Treat missing data in the focal genotype, or missing data in the comparison genotype, or missing data matching in both as a match
-          ##simMatrix[i,] <- as.double(rowSums(focalGenotypes[rep(i, numComparisonGenotypes),]==comparisonGenotypes, na.rm=TRUE) +
-          ##                                                rowSums(is.na(comparisonGenotypes) | is.na(focalGenotypes[i,])))
-          stop("allelematch:  missingMethod=0 is currently not implemented", call.=FALSE)
-      }
-      
+
       ## Determine which comparison genotypes meet the threshold
-      simMatrix <- simMatrix/ncol(focalGenotypes)
       pairwiseMatchesWhich <- which(simMatrix[i, ]  >= matchThreshold)
       pairwiseMatchesScores <- signif(simMatrix[i, pairwiseMatchesWhich],2)
       
@@ -371,10 +462,18 @@ amPairwise <- function(amDatasetFocal, amDatasetComparison=amDatasetFocal, allel
     amPairwise$missingCode <- amDatasetFocal$missingCode
     amPairwise$matchThreshold <- matchThreshold
     amPairwise$alleleMismatch <- alleleMismatch
+    amPairwise$minComparableLoci    <- minComparableLoci
     amPairwise$missingMethod <- missingMethod
     amPairwise$focalDatasetN <- nrow(amDatasetFocal$multilocus)
     amPairwise$comparisonDatasetN <- nrow(amDatasetComparison$multilocus)
-    if ((dim(amDatasetFocal$multilocus)==dim(amDatasetComparison$multilocus)) && (all(amDatasetFocal$multilocus==amDatasetComparison$multilocus))) {
+    
+    # Are both both data sets the same? Try the tests that are fastest to execute first:
+    # (Fixed warning that appeared when stepping revision of R to R-4.2.0:
+    #    'length(x) = 2 > 1' in coercion to 'logical(1)')
+    if ( (ncol(amDatasetFocal$multilocus)==ncol(amDatasetComparison$multilocus)) && 
+         (nrow(amDatasetFocal$multilocus)==nrow(amDatasetComparison$multilocus)) && 
+         (all(amDatasetFocal$multilocus==amDatasetComparison$multilocus))) 
+    {
       amPairwise$focalIsComparison <- TRUE
     }
     else {
@@ -408,6 +507,7 @@ summary.amPairwise <- function(object, html=NULL, csv=NULL, ...) {
         if (object$focalIsComparison) cat("focal dataset compared against itself\n")
         else cat("comparison dataset N=", object$comparisonDatasetN, "\n", sep="")
         cat("missing data represented by: ", object$missingCode, "\n", sep="")
+        if (!is.null(object$minComparableLoci)) { cat("Min number of comparable loci required for a match: ", object$minComparableLoci, "\n", sep="") }
         cat("missing data matching method: ", object$missingMethod, "\n", sep="")
         cat("alleleMismatch (m-hat; maximum number of mismatching alleles): ", object$alleleMismatch, "\n", sep="")
         cat("matchThreshold (s-hat; lowest matching score returned): ", object$matchThreshold, "\n\n", sep="")
@@ -469,7 +569,7 @@ summary.amUnique <- function(object, html=NULL, csv=NULL, ...) {
 
 ##
 ## amCluster()
-amCluster <- function(amDatasetFocal, runUntilSingletons=TRUE, cutHeight=0.3, missingMethod=2, consensusMethod=1, clusterMethod = "complete") {
+amCluster <- function(amDatasetFocal, runUntilSingletons=TRUE, cutHeight=0.3, missingMethod=2, consensusMethod=1, clusterMethod = "complete", minComparableLoci=NULL) {
   
   ## Check function call variables for validity
   if (!(class(amDatasetFocal) %in% c("amDataset", "amInterpolate", "amCluster"))) {
@@ -491,7 +591,8 @@ amCluster <- function(amDatasetFocal, runUntilSingletons=TRUE, cutHeight=0.3, mi
   
   originalFocalDatasetN <- nrow(amDatasetFocal$multilocus)
   
-  if (!(missingMethod %in% c(1,2))) stop("allelematch:  missingMethod must equal 1 or 2", call.=FALSE)
+  if (!is.null(minComparableLoci)) { printMinComparableLoci("amCluster", minComparableLoci, ncol(amDatasetFocal$multilocus), missingMethod) }
+  if (!(missingMethod %in% c(1,2))) stop("allelematch:  missingMethod must equal 1 or 2(default)", call.=FALSE)
   if (!(consensusMethod %in% c(1,2,3,4))) stop("allelematch:  consensusMethod must equal 1, 2, 3 or 4", call.=FALSE)
   if (!(tolower(clusterMethod) %in% c("complete", "average", "single"))) stop("allelematch:  clusterMethod must be \"complete\" or \"average\"", call.=FALSE)
 
@@ -505,7 +606,7 @@ amCluster <- function(amDatasetFocal, runUntilSingletons=TRUE, cutHeight=0.3, mi
     if (is.null(dim(amDatasetFocal$multilocus))) break
     
     ## Produce dissimilarity matrix
-    dissimMatrix <- amMatrix(amDatasetFocal, missingMethod=missingMethod)
+    dissimMatrix <- amMatrix(amDatasetFocal, minComparableLoci=minComparableLoci, missingMethod=missingMethod)
     
     ## Do agglomerative hierarchical clustering 
     tryCatch(dendro <- hclust(as.dist(dissimMatrix), method=clusterMethod),
@@ -599,7 +700,7 @@ amCluster <- function(amDatasetFocal, runUntilSingletons=TRUE, cutHeight=0.3, mi
         ## amMatrix does not use CPU time creating these unnecessarily.
    
         score <- amMatrix(amDataset(cbind(1:nrow(thisGenotype), thisGenotype), indexColumn=1,
-                                      missingCode=amDatasetFocal$missingCode), missingMethod=missingMethod)
+                                      missingCode=amDatasetFocal$missingCode), minComparableLoci=minComparableLoci, missingMethod=missingMethod)
          
         ## consensusMethod=1
         ## Find the genotype that has the highest similarity to other genotypes in the cluster and make it the consensus (focal)
@@ -790,6 +891,7 @@ amCluster <- function(amDatasetFocal, runUntilSingletons=TRUE, cutHeight=0.3, mi
     
     clusterAnalysis$cutHeight <- cutHeight
     clusterAnalysis$consensusMethod <- consensusMethod
+    clusterAnalysis$minComparableLoci    <- minComparableLoci
     clusterAnalysis$missingMethod <- missingMethod
     clusterAnalysis$clusterMethod <- clusterMethod
     clusterAnalysis$missingCode <- amDatasetFocal$missingCode
@@ -840,6 +942,7 @@ summary.amCluster <- function(object, html=NULL, csv=NULL, ...) {
         cat("Unique genotypes (by cluster consensus): ", length(object$cluster), "\n", sep="")
         cat("Unique genotypes (singletons): ", length(object$singletons), "\n\n", sep="")
         cat("Missing data represented by: ", object$missingCode, "\n", sep="")
+        if (!is.null(object$minComparableLoci)) { cat("Min number of comparable loci required for a match: ", object$minComparableLoci, "\n", sep="") }
         cat("Missing data matching method: ", object$missingMethod, "\n", sep="")
         cat("Clustered genotypes consensus method: ", object$consensusMethod, "\n", sep="")
         cat("Hierarchical clustering method: ", object$clusterMethod, "\n", sep="")
@@ -994,7 +1097,7 @@ print.amAlleleFreq <- function(x, ...) {
 }
 ##
 ## amUnique()
-amUnique <- function(amDatasetFocal, multilocusMap=NULL, alleleMismatch=NULL, matchThreshold=NULL, cutHeight=NULL, doPsib="missing", consensusMethod=1, verbose=FALSE) {
+amUnique <- function(amDatasetFocal, multilocusMap=NULL, alleleMismatch=NULL, matchThreshold=NULL, cutHeight=NULL, minComparableLoci=NULL, doPsib="missing", consensusMethod=1, verbose=FALSE) {
     
     if (!class(amDatasetFocal)=="amDataset") {
         stop("allelematch:  amDatasetFocal must be an object of class \"amDataset\"", call.=FALSE)
@@ -1036,6 +1139,10 @@ amUnique <- function(amDatasetFocal, multilocusMap=NULL, alleleMismatch=NULL, ma
         alleleMismatch <- round((1-matchThreshold)*length(multilocusMap),2)
     }
     else if (!is.null(alleleMismatch)) {
+        if ((alleleMismatch < 0) || (alleleMismatch > length(multilocusMap))) {
+                # TODO: Guard against matchThreshold becoming negative!
+                # stop("allelematch:  alleleMismatch (", alleleMismatch, ") must be positive and smaller than the number of alleles (", length(multilocusMap), ")", call.=FALSE)
+            }
             matchThreshold <- 1-(alleleMismatch/length(multilocusMap))
             cutHeight <- 1-matchThreshold
         }
@@ -1054,10 +1161,10 @@ amUnique <- function(amDatasetFocal, multilocusMap=NULL, alleleMismatch=NULL, ma
     
     ## Run the required analyses
     if (verbose) cat("allelematch:  amUnique:  Clustering genotypes\n")
-    clusterAnalysis <- amCluster(amDatasetFocal, cutHeight=cutHeight, runUntilSingletons=TRUE, consensusMethod=consensusMethod)
+    clusterAnalysis <- amCluster(amDatasetFocal, cutHeight=cutHeight, runUntilSingletons=TRUE, minComparableLoci=minComparableLoci, consensusMethod=consensusMethod)
     
     if (verbose) cat("allelematch:  amUnique:  Comparing unique genotypes identified by clustering to all samples\n")
-    clusterAnalysisPairwise <- amPairwise(clusterAnalysis$unique, amDatasetFocal, matchThreshold=matchThreshold)
+    clusterAnalysisPairwise <- amPairwise(clusterAnalysis$unique, amDatasetFocal, matchThreshold=matchThreshold, minComparableLoci=minComparableLoci)
 
     if (verbose) cat("allelematch:  amUnique:  Determining allele frequencies of unique genotypes identified by cluster\n")
     clusterAnalysisAlleleFreq <- amAlleleFreq(clusterAnalysis$unique, multilocusMap=multilocusMap)
@@ -1784,6 +1891,7 @@ amHTML.amCluster <- function(x, htmlFile=NULL, htmlCSS=amCSSForHTML()) {
         headerHTML[3, ] <- c("unique (consensus) N=", length(x$cluster))
         headerHTML[4, ] <- c("unique (singletons) N=", length(x$singletons))
         headerHTML[5, ] <- c("missing data represented by: ", x$missingCode)
+        # headerHTML[6, ] <- c("min number of comparable loci to match: ", x$minComparableLoci) # TODO Enter this into the HTML!
         headerHTML[6, ] <- c("missing data matching method: ", x$missingMethod)
         headerHTML[7, ] <- c("clustered genotypes consensus method: ", x$consensusMethod)
         headerHTML[8, ] <- c("hierarchical clustering method: ", x$clusterMethod)
