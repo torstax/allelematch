@@ -2,7 +2,7 @@ Package: allelematch
 Type: Package
 Title: Identifying Unique Multilocus Genotypes where Genotyping Error
         and Missing Data may be Present
-Version: 2.5.4
+Version: 2.5.4.9001
 Date: 2024-03-28
 Author: Paul Galpern <pgalpern@gmail.com>
 Maintainer: Todd Cross <todd.cross@gmail.com>
