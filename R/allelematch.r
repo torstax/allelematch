@@ -1,5 +1,5 @@
 ## allelematch R Package
-## v2.5.1
+## v2.5.1.9003
 ## allelematch:  Pairwise matching and identification of unique multilocus genotypes
 ##
 ## by Paul Galpern (aut, cre), Todd Cross (ctb), Katie Zarn (ctb)
@@ -176,7 +176,7 @@ printMinComparableLoci <- function(method, minComparableLoci, lociCount, missing
 amMatrix <- function(amDatasetFocal, missingMethod=2, minComparableLoci=NULL) {
   
   ## Check function call variables for validity
-  if (class(amDatasetFocal) != "amDataset") stop("allelematch:  amDatasetFocal must be an object of class \"amDataset\";  use amDataset() first", call.=FALSE)
+  if (!inherits(amDatasetFocal, "amDataset")) stop("allelematch:  amDatasetFocal must be an object of class \"amDataset\";  use amDataset() first", call.=FALSE)
   if (!is.null(minComparableLoci)) { printMinComparableLoci("amMatrix", minComparableLoci, ncol(amDatasetFocal$multilocus), missingMethod) }
   if (!(missingMethod %in% c(1,2))) stop("allelematch:  missingMethod must equal 1 or 2", call.=FALSE)
   
@@ -316,11 +316,11 @@ amSimilarityScore <- function(focalGenotypes, comparisonGenotypes=focalGenotypes
 amPairwise <- function(amDatasetFocal, amDatasetComparison=amDatasetFocal, alleleMismatch=NULL, matchThreshold=NULL, minComparableLoci=NULL, missingMethod=2) {
   
     ## Check function call variables for validity
-    if ((class(amDatasetFocal) != "amDataset") || (class(amDatasetComparison) != "amDataset")) {
+    if ((!inherits(amDatasetFocal, "amDataset")) || (!inherits(amDatasetComparison, "amDataset"))) {
         stop("allelematch:  amDatasetFocal and amDatasetComparison must be an object of class \"amDataset\";  use amDataset() first", call.=FALSE)
     }
     if (!is.null(minComparableLoci)) { printMinComparableLoci("amPairwise", minComparableLoci, ncol(amDatasetFocal$multilocus), missingMethod) }
-    if (!(missingMethod %in% c(1,2))) stop("allelematch:  missingMethod must equal 1 or 2(default)", call.=FALSE)
+    if (!(missingMethod %in% c(1,2))) stop("allelematch:  missingMethod must equal 1 or 2", call.=FALSE)
     
     ## More checking of input parameters
     if (sum(!(c(is.null(alleleMismatch), is.null(matchThreshold)))) != 1) {
@@ -466,12 +466,9 @@ amPairwise <- function(amDatasetFocal, amDatasetComparison=amDatasetFocal, allel
     amPairwise$missingMethod <- missingMethod
     amPairwise$focalDatasetN <- nrow(amDatasetFocal$multilocus)
     amPairwise$comparisonDatasetN <- nrow(amDatasetComparison$multilocus)
-    
+
     # Are both both data sets the same? Try the tests that are fastest to execute first:
-    # (Fixed warning that appeared when stepping revision of R to R-4.2.0:
-    #    'length(x) = 2 > 1' in coercion to 'logical(1)')
-    if ( (ncol(amDatasetFocal$multilocus)==ncol(amDatasetComparison$multilocus)) && 
-         (nrow(amDatasetFocal$multilocus)==nrow(amDatasetComparison$multilocus)) && 
+    if (identical(dim(amDatasetFocal$multilocus), dim(amDatasetComparison$multilocus)) &&
          (all(amDatasetFocal$multilocus==amDatasetComparison$multilocus))) 
     {
       amPairwise$focalIsComparison <- TRUE
@@ -489,7 +486,7 @@ amPairwise <- function(amDatasetFocal, amDatasetComparison=amDatasetFocal, allel
 ## summary.amPairwise()
 summary.amPairwise <- function(object, html=NULL, csv=NULL, ...) {
     
-    if (class(object) != "amPairwise") {
+    if (!inherits(object, "amPairwise")) {
         stop("allelematch:  this function requires an \"amPairwise\" object", call.=FALSE)
     }
     
@@ -549,7 +546,7 @@ summary.amPairwise <- function(object, html=NULL, csv=NULL, ...) {
 ## summary.amUnique()
 summary.amUnique <- function(object, html=NULL, csv=NULL, ...) {
     
-    if (class(object) != "amUnique") {
+    if (!inherits(object, "amUnique")) {
         stop("allelematch:  this function requires an \"amUnique\" object", call.=FALSE)
     }
     
@@ -575,11 +572,11 @@ amCluster <- function(amDatasetFocal, runUntilSingletons=TRUE, cutHeight=0.3, mi
   if (!(class(amDatasetFocal) %in% c("amDataset", "amInterpolate", "amCluster"))) {
         stop("allelematch:  amDatasetFocal must be an object of class \"amDataset\" or for recursive use, class \"amCluster\"", call.=FALSE)
   }
-  if (class(amDatasetFocal)=="amCluster") {
+  if (inherits(amDatasetFocal, "amCluster")) {
     amDatasetFocal <- amDatasetFocal$unique
   }
   
-  if (class(amDatasetFocal)=="amInterpolate") {
+  if (inherits(amDatasetFocal, "amInterpolate")) {
     reClass <- amDatasetFocal
     amDatasetFocal <- list()
     amDatasetFocal$index <- reClass$index
@@ -609,11 +606,11 @@ amCluster <- function(amDatasetFocal, runUntilSingletons=TRUE, cutHeight=0.3, mi
     dissimMatrix <- amMatrix(amDatasetFocal, minComparableLoci=minComparableLoci, missingMethod=missingMethod)
     
     ## Do agglomerative hierarchical clustering 
-    tryCatch(dendro <- hclust(as.dist(dissimMatrix), method=clusterMethod),
+    tryCatch(dendro <- stats::hclust(stats::as.dist(dissimMatrix), method=clusterMethod),
              error=function(x) stop("allelematch:  error in clustering, try a different clusterMethod", call.=FALSE))
     
     ## Do dynamic tree cutting, hybrid method
-    tryCatch(uniqueIndex <- cutreeHybrid(dendro, dissimMatrix, cutHeight=cutHeight, minClusterSize=1, verbose=0)$labels+1,
+    tryCatch(uniqueIndex <- dynamicTreeCut::cutreeHybrid(dendro, dissimMatrix, cutHeight=cutHeight, minClusterSize=1, verbose=0)$labels+1,
              error=function(x) stop("allelematch:  error in dynamic tree cutting; several causes for this error; have you installed dynamicTreeCut package?  install.packages(\"dynamicTreeCut\")", call.=FALSE))
     numLabels <- length(unique(uniqueIndex))
     
@@ -923,7 +920,7 @@ amCluster <- function(amDatasetFocal, runUntilSingletons=TRUE, cutHeight=0.3, mi
 ## summary.amCluster()
 summary.amCluster <- function(object, html=NULL, csv=NULL, ...) {
     
-    if (class(object) != "amCluster") {
+    if (!inherits(object, "amCluster")) {
         stop("allelematch:  this function requires an \"amCluster\" object", call.=FALSE)
     }
     
@@ -1038,7 +1035,7 @@ summary.amCluster <- function(object, html=NULL, csv=NULL, ...) {
 ## amAlleleFreq()
 amAlleleFreq <- function(amDatasetFocal, multilocusMap=NULL) {
     
-    if (class(amDatasetFocal) != "amDataset") {
+    if (!inherits(amDatasetFocal, "amDataset")) {
         stop("allelematch:  amDatasetFocal must be an object of class \"amDataset\"", call.=FALSE)
     }
     
@@ -1099,7 +1096,7 @@ print.amAlleleFreq <- function(x, ...) {
 ## amUnique()
 amUnique <- function(amDatasetFocal, multilocusMap=NULL, alleleMismatch=NULL, matchThreshold=NULL, cutHeight=NULL, minComparableLoci=NULL, doPsib="missing", consensusMethod=1, verbose=FALSE) {
     
-    if (!class(amDatasetFocal)=="amDataset") {
+    if (!inherits(amDatasetFocal, "amDataset")) {
         stop("allelematch:  amDatasetFocal must be an object of class \"amDataset\"", call.=FALSE)
     }
     
@@ -1306,7 +1303,7 @@ amUnique <- function(amDatasetFocal, multilocusMap=NULL, alleleMismatch=NULL, ma
 ## amUniqueProfile()
 amUniqueProfile <- function(amDatasetFocal, multilocusMap=NULL, alleleMismatch=NULL, matchThreshold=NULL, cutHeight=NULL, guessOptimum=TRUE, doPlot=TRUE, consensusMethod=1, verbose=TRUE) {
     
-    if (!class(amDatasetFocal)=="amDataset") {
+    if (!inherits(amDatasetFocal, "amDataset")) {
         stop("allelematch:  amDatasetFocal must be an object of class \"amDataset\"", call.=FALSE)
     }
     
@@ -1472,36 +1469,36 @@ amUniqueProfile <- function(amDatasetFocal, multilocusMap=NULL, alleleMismatch=N
     
     if (doPlot) {
         #dev.new()
-        layout(matrix(c(1,1,1,1,1,1,1,2,2,2), 1, 10))
-        par(mar=c(5.1, 4.1, 2, 2))
+        graphics::layout(matrix(c(1,1,1,1,1,1,1,2,2,2), 1, 10))
+        graphics::par(mar=c(5.1, 4.1, 2, 2))
 
-        plot.default(c(min(profileResults[, profileType]), max(profileResults[, profileType])), c(0, max(profileResults[, c("unique", "unclassified", "multipleMatch")])),
+        graphics::plot.default(c(min(profileResults[, profileType]), max(profileResults[, profileType])), c(0, max(profileResults[, c("unique", "unclassified", "multipleMatch")])),
                      type="n", axes=TRUE, xlab=profileType, ylab="Count", cex=2)
-        points(profileResults[, profileType], profileResults[, "unique"], pch=19, col="red")
-        lines(profileResults[, profileType], profileResults[, "unique"], lwd=2, lty="solid", col="red")
-        points(profileResults[, profileType], profileResults[, "multipleMatch"], pch=22, col="black")
-        lines(profileResults[, profileType], profileResults[, "multipleMatch"], lwd=1, lty="solid", col="black")
-        points(profileResults[, profileType], profileResults[, "unclassified"], pch=24, col="black")
-        lines(profileResults[, profileType], profileResults[, "unclassified"],  lwd=1, lty="dotted", col="black")   
+        graphics::points(profileResults[, profileType], profileResults[, "unique"], pch=19, col="red")
+        graphics::lines(profileResults[, profileType], profileResults[, "unique"], lwd=2, lty="solid", col="red")
+        graphics::points(profileResults[, profileType], profileResults[, "multipleMatch"], pch=22, col="black")
+        graphics::lines(profileResults[, profileType], profileResults[, "multipleMatch"], lwd=1, lty="solid", col="black")
+        graphics::points(profileResults[, profileType], profileResults[, "unclassified"], pch=24, col="black")
+        graphics::lines(profileResults[, profileType], profileResults[, "unclassified"],  lwd=1, lty="dotted", col="black")   
         if (guessOptimum) {
-            arrows(profileResults[, profileType][which(profileResults$guessOptimum)], max(profileResults[, c("unique", "unclassified", "multipleMatch")])*0.3,
+            graphics::arrows(profileResults[, profileType][which(profileResults$guessOptimum)], max(profileResults[, c("unique", "unclassified", "multipleMatch")])*0.3,
                    profileResults[, profileType][which(profileResults$guessOptimum)], 0, length=0.15, angle=20, lwd=2)
         }
         
-        par(mar=c(0,0,0,1))
-        plot.default(c(0,100), c(0,100), type="n", axes=FALSE, ylab="", xlab="")
-        text(0, 100, "allelematch", cex=2, adj=c(0,0.5))
-        text(0, 97, "amUniqueProfile()", cex=1, adj=c(0,0.5))
-        text(0, 88, paste("missingDataLoad=", profileResults$missingDataLoad[1], sep=""), cex=1, adj=c(0,0.5))
-        text(0, 86, paste("allelicDiversity=", profileResults$allelicDiversity[1], sep=""), cex=1, adj=c(0,0.5))
-        legend(x=0, y=50, legend=c("unique", "multipleMatch", "unclassified"), lwd=c(2, 1, 1), lty=c("solid", "solid", "dotted"), col=c("red", "black", "black"), pch=c(19, 22, 24))
+        graphics::par(mar=c(0,0,0,1))
+        graphics::plot.default(c(0,100), c(0,100), type="n", axes=FALSE, ylab="", xlab="")
+        graphics::text(0, 100, "allelematch", cex=2, adj=c(0,0.5))
+        graphics::text(0, 97, "amUniqueProfile()", cex=1, adj=c(0,0.5))
+        graphics::text(0, 88, paste("missingDataLoad=", profileResults$missingDataLoad[1], sep=""), cex=1, adj=c(0,0.5))
+        graphics::text(0, 86, paste("allelicDiversity=", profileResults$allelicDiversity[1], sep=""), cex=1, adj=c(0,0.5))
+        graphics::legend(x=0, y=50, legend=c("unique", "multipleMatch", "unclassified"), lwd=c(2, 1, 1), lty=c("solid", "solid", "dotted"), col=c("red", "black", "black"), pch=c(19, 22, 24))
         if (guessOptimum) {
-            text(0, 35, "Best guess for optimum:", cex=1, adj=c(0,0.5))
-            text(0, 33, paste(profileType, "=", signif(profileResults[, profileType][which(profileResults$guessOptimum)], 2), sep=""), cex=1, adj=c(0, 0.5))
-            text(0, 25, "Profile morphology:", cex=1, adj=c(0,0.5))
-            text(0, 23, profileMorphology, cex=1, adj=c(0, 0.5))
+            graphics::text(0, 35, "Best guess for optimum:", cex=1, adj=c(0,0.5))
+            graphics::text(0, 33, paste(profileType, "=", signif(profileResults[, profileType][which(profileResults$guessOptimum)], 2), sep=""), cex=1, adj=c(0, 0.5))
+            graphics::text(0, 25, "Profile morphology:", cex=1, adj=c(0,0.5))
+            graphics::text(0, 23, profileMorphology, cex=1, adj=c(0, 0.5))
             if (profileMorphology %in% c("NonZeroSecondMinimum", "NoSecondMinimum")) {
-                text(0, 21, "Caution with optimum", col="red", cex=1, adj=c(0, 0.5))
+                graphics::text(0, 21, "Caution with optimum", col="red", cex=1, adj=c(0, 0.5))
             }
         }  
     }    
@@ -1664,7 +1661,7 @@ amCSSForHTML <- function() {
 ## amHTML.amPairwise()
 amHTML.amPairwise <- function(x, htmlFile=NULL, htmlCSS=amCSSForHTML()) {
     
-    if (class(x) != "amPairwise") {
+    if (!inherits(x, "amPairwise")) {
         stop("allelematch:  this function requires an \"amPairwise\" object", call.=FALSE)
     }
     
@@ -1713,7 +1710,7 @@ amHTML.amPairwise <- function(x, htmlFile=NULL, htmlCSS=amCSSForHTML()) {
     headerHTML <-  matrix("", 6, 2)
     headerHTML[1,] <- c("\nfocal dataset N=", x$focalDatasetN)
         
-    if (class(x) == "amPairwise") {
+    if (inherits(x, "amPairwise")) {
         if (x$focalIsComparison)
             headerHTML[2, ]<- c("focal dataset compared against itself", "")
         else
@@ -1823,7 +1820,7 @@ amHTML.amPairwise <- function(x, htmlFile=NULL, htmlCSS=amCSSForHTML()) {
     ## Also take this opportunity to clean up temp folder, if required
     if (usingTmpFile) {
         cat("Opening HTML file (", htmlFile, ") in default browser...\n", sep="")
-        browseURL(htmlFile)
+        utils::browseURL(htmlFile)
         if (htmlFilePath != ".") {
             oldTmpFiles <- Sys.glob(paste(htmlFilePath, "\\am*.htm", sep=""))
             if (length(oldTmpFiles) > 0) {
@@ -1838,7 +1835,7 @@ amHTML.amPairwise <- function(x, htmlFile=NULL, htmlCSS=amCSSForHTML()) {
 ## amHTML.amCluster()
 amHTML.amCluster <- function(x, htmlFile=NULL, htmlCSS=amCSSForHTML()) {
     
-    if (class(x) != "amCluster") {
+    if (!inherits(x, "amCluster")) {
         stop("allelematch:  this function requires an \"amCluster\" object", call.=FALSE)
     }
     
@@ -1886,7 +1883,7 @@ amHTML.amCluster <- function(x, htmlFile=NULL, htmlCSS=amCSSForHTML()) {
     headerHTML <-  matrix("", 12, 2)
     headerHTML[1,] <- c("\nFocal dataset N=", x$focalDatasetN)
     
-    if (class(x) == "amCluster") {
+    if (inherits(x, "amCluster")) {
         headerHTML[2, ] <- c("unique N=", nrow(x$unique$multilocus))
         headerHTML[3, ] <- c("unique (consensus) N=", length(x$cluster))
         headerHTML[4, ] <- c("unique (singletons) N=", length(x$singletons))
@@ -2162,7 +2159,7 @@ amHTML.amCluster <- function(x, htmlFile=NULL, htmlCSS=amCSSForHTML()) {
     ## Also take this opportunity to clean up temp folder, if required
     if (usingTmpFile) {
         cat("Opening HTML file (", htmlFile, ") in default browser...\n", sep="")
-        browseURL(htmlFile)
+        utils::browseURL(htmlFile)
         if (htmlFilePath != ".") {
             oldTmpFiles <- Sys.glob(paste(htmlFilePath, "\\am*.htm", sep=""))
             if (length(oldTmpFiles) > 0) {
@@ -2178,7 +2175,7 @@ amHTML.amCluster <- function(x, htmlFile=NULL, htmlCSS=amCSSForHTML()) {
 amHTML.amUnique <- function(x, htmlFile=NULL, htmlCSS=amCSSForHTML()) {
 
   
-    if (class(x) != "amUnique") {
+    if (!inherits(x, "amUnique")) {
         stop("allelematch:  this function requires an \"amUnique\" object", call.=FALSE)
     }
     
@@ -2225,7 +2222,7 @@ amHTML.amUnique <- function(x, htmlFile=NULL, htmlCSS=amCSSForHTML()) {
     
 
         
-    if (class(x) == "amUnique") {
+    if (inherits(x, "amUnique")) {
         headerHTML <-  matrix("", 14, 2)
         headerHTML[1, ] <- c("\nunique N=", x$focalDatasetN)
         headerHTML[2, ] <- c("samples N=", x$comparisonDatasetN)
@@ -2500,7 +2497,7 @@ amHTML.amUnique <- function(x, htmlFile=NULL, htmlCSS=amCSSForHTML()) {
     ## Also take this opportunity to clean up temp folder, if required
     if (usingTmpFile) {
         cat("Opening HTML file (", htmlFile, ") in default browser...\n", sep="")
-        browseURL(htmlFile)
+        utils::browseURL(htmlFile)
         if (htmlFilePath != ".") {
             oldTmpFiles <- Sys.glob(paste(htmlFilePath, "\\am*.htm", sep=""))
             if (length(oldTmpFiles) > 0) {
@@ -2517,7 +2514,7 @@ amHTML.amUnique <- function(x, htmlFile=NULL, htmlCSS=amCSSForHTML()) {
 ## amCSV.amPairwise()
 amCSV.amPairwise <- function(x, csvFile) {
     
-    if (class(x) != "amPairwise") {
+    if (!inherits(x, "amPairwise")) {
         stop("allelematch:  this function requires an \"amPairwise\" object", call.=FALSE)
     }
      
@@ -2562,14 +2559,14 @@ amCSV.amPairwise <- function(x, csvFile) {
     }
     csvTable <- csvTable[2:nrow(csvTable), ]
 
-    write.csv(csvTable, file=csvFile, row.names=FALSE)
+    utils::write.csv(csvTable, file=csvFile, row.names=FALSE)
 }
 
 ##
 ## amCSV.amCluster()
 amCSV.amCluster <- function(x, csvFile) {
      
-    if (class(x) != "amCluster") {
+    if (!inherits(x, "amCluster")) {
         stop("allelematch:  this function requires an \"amCluster\" object", call.=FALSE)
     }
     
@@ -2581,13 +2578,13 @@ amCSV.amCluster <- function(x, csvFile) {
         csvTable <- cbind(index=y$index, y$multilocus)
     }
     
-    write.csv(csvTable, file=csvFile, row.names=FALSE)
+    utils::write.csv(csvTable, file=csvFile, row.names=FALSE)
 }
 #
 ## amCSV.amUnique()
 amCSV.amUnique <- function(x, csvFile, uniqueOnly=FALSE) {
         
-    if (class(x) != "amUnique") {
+    if (!inherits(x, "amUnique")) {
         stop("allelematch:  this function requires an \"amUnique\" object", call.=FALSE)
     }
 
@@ -2749,7 +2746,7 @@ amCSV.amUnique <- function(x, csvFile, uniqueOnly=FALSE) {
         }
         csvTable <- csvTable[2:nrow(csvTable), ]
     
-        write.csv(csvTable, file=csvFile, row.names=FALSE)
+        utils::write.csv(csvTable, file=csvFile, row.names=FALSE)
     }
 }
 
