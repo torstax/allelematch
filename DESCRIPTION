@@ -1,7 +1,7 @@
 Package: allelematch
 Title: Identifying Unique Multilocus Genotypes where Genotyping Error
         and Missing Data may be Present
-Version: 2.5.3.9003
+Version: 2.5.3.9004
 Authors@R: c(
 	person("Paul", "Galpern", email = "pgalpern@gmail.com", role = "aut"), 
 	person("Todd", "Cross", email = "todd.cross@gmail.com", role = c("cre", "ctb")), 

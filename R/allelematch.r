@@ -1,5 +1,5 @@
 ## allelematch R Package
-## v2.5.4.9003
+## v2.5.4.9004
 ## allelematch:  Pairwise matching and identification of unique multilocus genotypes
 ##
 ## by Paul Galpern
@@ -38,11 +38,16 @@ amDataset <-
            missingCode = "-99",
            indexColumn = NULL,
            metaDataColumn = NULL,
-           ignoreColumn = NULL) {
+           ignoreColumn = NULL,
+           multilocusMap = NULL) {
     ## Create amDataset object
     newDataset <- list()
     class(newDataset) <- "amDataset"
 
+    # Prepare to count the columns used by the parameters after multilocusDataset
+    # to make sure they match multilocusDataset:
+    columnCount = 0;
+    
     ## Check function call variables for validity
     if (is.null(dim(multilocusDataset)))
       stop("allelematch:  multilocusDataset must be a matrix or a data.frame",
@@ -58,55 +63,59 @@ amDataset <-
       )
     }
     if (!is.null(indexColumn)) {
+      columnCount = columnCount + 1;
       if (length(indexColumn) > 1)
         stop("allelematch:  only one indexColumn permitted", call. = FALSE)
-        if (is.character(indexColumn)) {
-        indexColumnWhich <-
-          which(indexColumn == dimnames(multilocusDataset)[[2]])
-        if (length(indexColumnWhich) == 0)
+      if (is.character(indexColumn)) {
+      indexColumnWhich <-
+        which(indexColumn == dimnames(multilocusDataset)[[2]])
+      if (length(indexColumnWhich) == 0)
+        stop("allelematch:  indexColumn does not exist in multilocusDataset",
+             call. = FALSE)
+      } else {
+        indexColumnWhich <- indexColumn
+        if (length(indexColumn))
+        if (indexColumnWhich > ncol(multilocusDataset))
           stop("allelematch:  indexColumn does not exist in multilocusDataset",
                call. = FALSE)
-      } else {
-            indexColumnWhich <- indexColumn
-            if (length(indexColumn))
-          if (indexColumnWhich > ncol(multilocusDataset))
-            stop("allelematch:  indexColumn does not exist in multilocusDataset",
-                 call. = FALSE)
         }
     } else {
         indexColumnWhich <- 0
     }
     if (!is.null(metaDataColumn)) {
+      columnCount = columnCount + 1;
       if (length(metaDataColumn) > 1)
         stop("allelematch:  only one metaDataColumn permitted", call. = FALSE)
-        if (is.character(metaDataColumn)) {
+      if (is.character(metaDataColumn)) {
         metaDataColumnWhich <-
-          which(metaDataColumn == dimnames(multilocusDataset)[[2]])
+            which(metaDataColumn == dimnames(multilocusDataset)[[2]])
         if (length(metaDataColumnWhich) == 0)
           stop("allelematch:  metaDataColumn does not exist in multilocusDataset",
                call. = FALSE)
       } else {
-            metaDataColumnWhich <- metaDataColumn
-        # if (length(metaDataColumn))
-          if (metaDataColumnWhich > ncol(multilocusDataset))
-            stop("allelematch:  metaDataColumn does not exist in multilocusDataset",
-                 call. = FALSE)
+        metaDataColumnWhich <- metaDataColumn
+      # if (length(metaDataColumn))
+        if (metaDataColumnWhich > ncol(multilocusDataset))
+          stop("allelematch:  metaDataColumn does not exist in multilocusDataset",
+               call. = FALSE)
         }
     } else {
         metaDataColumnWhich <- 0
     }
     if (!is.null(ignoreColumn)) {
-        if (is.character(ignoreColumn)) {
-        ignoreColumnWhich <-
-          which(as.logical(rowSums(
-            sapply(ignoreColumn, function(x)
-              x == dimnames(multilocusDataset)[[2]])
-          )))
-        if (length(ignoreColumnWhich) != length(ignoreColumn))
-          stop(
-            "allelematch:  one or more ignoreColumn does not exist in multilocusDataset",
-            call. = FALSE
-          )
+      columnCount = columnCount + length(ignoreColumn);
+      
+      if (is.character(ignoreColumn)) {
+      ignoreColumnWhich <-
+        which(as.logical(rowSums(
+          sapply(ignoreColumn, function(x)
+            x == dimnames(multilocusDataset)[[2]])
+        )))
+      if (length(ignoreColumnWhich) != length(ignoreColumn))
+        stop(
+          "allelematch:  one or more ignoreColumn does not exist in multilocusDataset",
+          call. = FALSE
+        )
       } else {
             ignoreColumnWhich <- ignoreColumn
         # if (length(ignoreColumn))
@@ -119,7 +128,17 @@ amDataset <-
     } else {
         ignoreColumnWhich <- 0
     }
-    
+    if (!is.null(multilocusMap)) {
+      columnCount = columnCount + length(multilocusMap);
+      if (columnCount != ncol(multilocusDataset))
+        # TODO : Print out the numbers!
+        stop("allelematch:  The number of columns in the multilocusDataset does not match the other parameters!",
+             call. = FALSE)
+    } else {
+      # As it was not given, set multilocusMap to default
+      # at the end of this function, based on the other properties of this amDataset
+    }
+
     ## Prepare multilocusDataset
     columnDataset <- dimnames(multilocusDataset)[[2]]
     multilocusDataset <-
@@ -144,6 +163,7 @@ amDataset <-
         gsub(" ", "", x)))
     newDataset$index <- gsub(" ", "", newDataset$index)
     columnDataset <- columnDataset[!keepTheseColumns]
+    
     ## Assign index and multilocus column names if not given
     if (length(newDataset$index)==0) {
         if (nrow(newDataset$multilocus) > 17576) {
@@ -184,6 +204,41 @@ amDataset <-
     } else {
         newDataset$missingCode <- missingCode
     }
+    
+    # Set multilocusMap to default if not given
+    # Default is two allele columns for each locus
+    if (is.null(multilocusMap)) {
+      if ((ncol(newDataset$multilocus) %% 2) != 0) {
+        stop(
+          "allelematch:  there are an odd number of genotype columns in amDataset; Please specify multilocusMap manually",
+          call. = FALSE
+        )
+      } else {
+        verbose = FALSE # TODO make this a parameter to amDataset!
+        if(verbose == TRUE)
+          cat(
+            "allelematch:  assuming genotype columns are in pairs, representing",
+            ncol(newDataset$multilocus) / 2,
+            "loci\n"
+          )
+      }
+      multilocusMap <-
+        rep(1:(ncol(newDataset$multilocus) / 2), each = 2)
+    } else if (length(multilocusMap) != ncol(newDataset$multilocus))  { ## Check multilocusMap is the correct length
+      stop(
+        "allelematch:  multilocusMap must be a vector of integers or strings giving the mappings onto loci for all genotype columns in amDatasetFocal;
+             Example: gender followed by 4 diploid loci in paired columns could be coded: mutlilocusMap=c(1,2,2,3,3,4,4,5,5)
+             or as: multilocusMap=c(\"GENDER\",\"LOC1\",\"LOC1\",\"LOC2\",\"LOC2\",\"LOC3\",\"LOC3\",\"LOC4\",\"LOC4\")",
+        call. = FALSE
+      )
+    } else if (sum(table(multilocusMap) > 2) > 0) {
+      stop(
+        "allelematch:  multilocusMap indicates that a locus occurs in three or more columns;  this situation is not yet handled",
+        call. = FALSE
+      )
+    }
+    newDataset$multilocusMap <- as.integer(as.factor(multilocusMap))
+
     return(newDataset)
 }
 
@@ -211,7 +266,11 @@ amMatrix <- function(amDatasetFocal, missingMethod = 2, minComparableLoci=NULL) 
     )
   if (!(missingMethod %in% c(1, 2)))
     stop("allelematch:  missingMethod must equal 1 or 2", call. = FALSE)
-  if (!is.null(minComparableLoci)) {} # TODO check integer between 0 andncol(amDatasetFocal$multilocus))!
+  if (!is.null(minComparableLoci)) {
+    if (is.null(amDatasetFocal$multilocusMap))
+      stop("allelematch:  Passing minComparableLoci to amMatrix requires the amDataset to have been created with a multilocusMap", call. = FALSE)
+    # TODO check that minComparableLoci is integer between 0 and ncol(amDatasetFocal$multilocus))!
+  } 
   
   ## Create variables from amDatasetFocal object
   numGenotypes <- nrow(amDatasetFocal$multilocus)
@@ -235,7 +294,7 @@ amMatrix <- function(amDatasetFocal, missingMethod = 2, minComparableLoci=NULL) 
   class(dissimMatrix) <- "amMatrix"
   return(dissimMatrix)
 }
-
+  
 
 ## amSimilarityScore()
 ## Returns a similarity matris with a similarity score for every genotype match.
@@ -272,6 +331,7 @@ amMatrix <- function(amDatasetFocal, missingMethod = 2, minComparableLoci=NULL) 
 ##  that is described in chapter 2.1, page 3, step 1 of the vignette at
 ##  https://cran.r-project.org/web/packages/allelematch/vignettes/allelematchSuppDoc.pdf
 ##
+#### amSimilarityScore() ####
 amSimilarityScore <- function(focalGenotypes, comparisonGenotypes=focalGenotypes, minComparableLoci=NULL, missingMethod=NULL) {
   startTime <- Sys.time() # This method is a hot-spot. Measure how log it takes to execute.
 
@@ -284,16 +344,22 @@ amSimilarityScore <- function(focalGenotypes, comparisonGenotypes=focalGenotypes
     }
   }
   if (!is.null(minComparableLoci)) { 
+      if (is.null(focalGenotypes$multilocusMap))
+        stop("allelematch:  Passing minComparableLoci to amSimilarityScore requires the amDataset focalGenotypes to have been created with a multilocusMap", call. = FALSE)
+      if (is.null(comparisonGenotypes$multilocusMap))
+        stop("allelematch:  Passing minComparableLoci to amSimilarityScore requires the amDataset comparisonGenotypes to have been created with a multilocusMap", call. = FALSE)
+      # TODO check that minComparableLoci is integer between 0 and ncol(amDatasetFocal$multilocus))!
+
     missingMethod=0 # TEMP for TEST: Always let minComparableLoci overrule missingMethod
     minComparableAlleles = 2*minComparableLoci # We look for two different alleles (X and Y) in each locus
   }
-  
-  
+
   numFocalGenotypes      <- nrow(focalGenotypes)
   numComparisonGenotypes <- nrow(comparisonGenotypes)
 
   alleleCount <- ncol(focalGenotypes) # Number of alleles to compare
   if (ncol(focalGenotypes) != ncol(comparisonGenotypes)) {
+    # TODO: Is this allowed?
     cat("allelematch: amSimilarityScore: Hmm. ncol(focalGenotypes)=", ncol(focalGenotypes), " != ncol(comparisonGenotypes)=", ncol(comparisonGenotypes), sep="")
   }
 
@@ -1866,213 +1932,443 @@ amUniqueProfile <-
            alleleMismatch = NULL,
            matchThreshold = NULL,
            cutHeight = NULL,
-           # TODO No minComparableLoci here?
+           minComparableLoci = NULL,
            guessOptimum = TRUE,
            doPlot = TRUE,
            consensusMethod = 1,
            verbose = TRUE) {
     if (!inherits(amDatasetFocal, "amDataset")) {
-        stop("allelematch:  amDatasetFocal must be an object of class \"amDataset\"", call. = FALSE)
+      stop("allelematch:  amDatasetFocal must be an object of class \"amDataset\"",
+           call. = FALSE)
     }
-    
+
+    if (is.null(amDatasetFocal$multilocusMap)) {
+      if (!is.null(multilocusMap)) {
+        amDatasetFocal$multilocusMap = multilocusMap # Just for this copy of amDataSetLocal
+      }
+    } 
     # Set multilocusMap to default if not given
-    if (is.null(multilocusMap)) {
-        if ((ncol(amDatasetFocal$multilocus)%%2) != 0) {
-            stop("allelematch:  there are an odd number of genotype columns in amDatasetFocal; Please specify multilocusMap manually", call. = FALSE)
-        }
-        else cat("allelematch:  assuming genotype columns are in pairs, representing", ncol(amDatasetFocal$multilocus)/2, "loci\n")
-        multilocusMap <- rep(1:(ncol(amDatasetFocal$multilocus)/2), each=2)
-    }
-    ## Check multilocusMap is the correct length
-    else if (length(multilocusMap) != ncol(amDatasetFocal$multilocus))  {
-        stop("allelematch:  multilocusMap must be a vector of integers or strings giving the mappings onto loci for all genotype columns in amDatasetFocal;
+    if (is.null(multilocusMap) && is.null(amDatasetFocal$multilocusMap)) {
+      if ((ncol(amDatasetFocal$multilocus) %% 2) != 0) {
+        stop(
+          "allelematch:  there are an odd number of genotype columns in amDatasetFocal; Please specify multilocusMap manually",
+          call. = FALSE
+        )
+      } else
+        cat(
+          "allelematch:  assuming genotype columns are in pairs, representing",
+          ncol(amDatasetFocal$multilocus) / 2,
+          "loci\n"
+        )
+      multilocusMap <-
+        rep(1:(ncol(amDatasetFocal$multilocus) / 2), each = 2)
+    } else if (length(multilocusMap) != ncol(amDatasetFocal$multilocus))  { ## Check multilocusMap is the correct length
+      stop(
+        "allelematch:  multilocusMap must be a vector of integers or strings giving the mappings onto loci for all genotype columns in amDatasetFocal;
              Example: gender followed by 4 diploid loci in paired columns could be coded: mutlilocusMap=c(1,2,2,3,3,4,4,5,5)
-             or as: multilocusMap=c(\"GENDER\",\"LOC1\",\"LOC1\",\"LOC2\",\"LOC2\",\"LOC3\",\"LOC3\",\"LOC4\",\"LOC4\")", call. = FALSE)
-    }
-    else if (sum(table(multilocusMap) > 2) > 0) {
-        stop("allelematch:  multilocusMap indicates that a locus occurs in three or more columns;  this situation is not yet handled", call. = FALSE)
+             or as: multilocusMap=c(\"GENDER\",\"LOC1\",\"LOC1\",\"LOC2\",\"LOC2\",\"LOC3\",\"LOC3\",\"LOC4\",\"LOC4\")",
+        call. = FALSE
+      )
+    } else if (sum(table(multilocusMap) > 2) > 0) {
+      stop(
+        "allelematch:  multilocusMap indicates that a locus occurs in three or more columns;  this situation is not yet handled",
+        call. = FALSE
+      )
     }
     multilocusMap <- as.integer(as.factor(multilocusMap))
 
     ## More checking of input parameters
-    if (sum(!(c(is.null(alleleMismatch), is.null(matchThreshold), is.null(cutHeight)))) > 1) {
-        stop("allelematch:  please specify alleleMismatch OR matchThreshold OR cutHeight.", call. = FALSE)
+    if (sum(!(c(
+      is.null(alleleMismatch),
+      is.null(matchThreshold),
+      is.null(cutHeight)
+    ))) > 1) {
+      stop(
+        "allelematch:  please specify alleleMismatch OR matchThreshold OR cutHeight.",
+        call. = FALSE
+      )
     }
-    
-    if (sum(!(c(is.null(alleleMismatch), is.null(matchThreshold), is.null(cutHeight))))==0) {
-        alleleMismatch <- seq(0, floor(length(multilocusMap))*0.4, 1)
-        matchThreshold <- 1-(alleleMismatch/length(multilocusMap))
-        cutHeight <- 1-matchThreshold
+
+    if (sum(!(c(
+      is.null(alleleMismatch),
+      is.null(matchThreshold),
+      is.null(cutHeight)
+    ))) == 0) {
+      alleleMismatch <- seq(0, floor(length(multilocusMap)) * 0.4, 1)
+      matchThreshold <- 1 - (alleleMismatch / length(multilocusMap))
+      cutHeight <- 1 - matchThreshold
+      profileType <- "alleleMismatch"
+    } else {
+      if (length(c(alleleMismatch, matchThreshold, cutHeight)) < 2) {
+        stop(
+          "allelematch:  please provide a range of parameter values for alleleMismatch OR matchThreshold OR cutHeight.  e.g. alleleMismatch=c(0,1,2,3,4,5,6,7,8)",
+          call. = FALSE
+        )
+      }
+
+      if (!is.null(alleleMismatch)) {
+        if (length(alleleMismatch) <= 2) {
+          stop(
+            "allelematch:  alleleMismatch must be a vector containing a sequence of three or more values",
+            call. = FALSE
+          )
+        }
+        matchThreshold <-
+          1 - (alleleMismatch / length(multilocusMap))
+        cutHeight <- 1 - matchThreshold
         profileType <- "alleleMismatch"
+      } else if (!is.null(cutHeight)) {
+        if ((any(cutHeight < 0)) || (any(cutHeight > 1))) {
+          stop("allelematch:  cutHeight must be between 0 and 1", call. = FALSE)
+        }
+        if (length(cutHeight) <= 2) {
+          stop(
+            "allelematch:  cutHeight must be a vector containing a sequence of three or more values",
+            call. = FALSE
+          )
+        }
+        matchThreshold <- 1 - cutHeight
+        alleleMismatch <-
+          round((1 - matchThreshold) * length(multilocusMap), 2)
+        profileType <- "cutHeight"
+      } else {
+        if ((any(matchThreshold < 0)) || (any(matchThreshold > 1))) {
+          stop("allelematch:  matchThreshold must be between 0 and 1",
+               call. = FALSE)
+        }
+        if (length(matchThreshold) <= 2) {
+          stop(
+            "allelematch:  matchThreshold must be a vector containing a sequence of three or more values",
+            call. = FALSE
+          )
+        }
+        cutHeight <- 1 - matchThreshold
+        alleleMismatch <-
+          round((1 - matchThreshold) * length(multilocusMap), 2)
+        profileType <- "matchThreshold"
+      }
     }
-    else {
-        if (length(c(alleleMismatch, matchThreshold, cutHeight))<2) {
-            stop("allelematch:  please provide a range of parameter values for alleleMismatch OR matchThreshold OR cutHeight.  e.g. alleleMismatch=c(0,1,2,3,4,5,6,7,8)", call. = FALSE)
-        }
-    
-        if (!is.null(alleleMismatch)) {
-            if (length(alleleMismatch) <= 2) {
-                stop("allelematch:  alleleMismatch must be a vector containing a sequence of three or more values", call. = FALSE)
-            }
-            matchThreshold <- 1-(alleleMismatch/length(multilocusMap))
-            cutHeight <- 1-matchThreshold
-            profileType <- "alleleMismatch"
-        }
-        else if (!is.null(cutHeight)) {
-            if ((any(cutHeight < 0)) || (any(cutHeight > 1))) {
-                stop("allelematch:  cutHeight must be between 0 and 1", call. = FALSE)
-            }
-            if(length(cutHeight <= 2)) {
-                stop("allelematch:  cutHeight must be a vector containing a sequence of three or more values", call. = FALSE)    
-            }
-            matchThreshold <- 1-cutHeight
-            alleleMismatch <- round((1-matchThreshold)*length(multilocusMap),2)
-            profileType <- "cutHeight"
-        }
-        else {
-            if ((any(matchThreshold < 0)) || (any(matchThreshold > 1))) {
-                stop("allelematch:  matchThreshold must be between 0 and 1", call. = FALSE)
-            }
-            if(length(matchThreshold <= 2)) {
-                stop("allelematch:  matchThreshold must be a vector containing a sequence of three or more values", call. = FALSE)    
-            }
-            cutHeight <- 1-matchThreshold
-            alleleMismatch <- round((1-matchThreshold)*length(multilocusMap),2)
-            profileType <- "matchThreshold"
-        }
+    if (verbose) {
+      cat(
+        "allelematch:  running amUnique() at",
+        length(matchThreshold),
+        "different values of",
+        profileType,
+        "\n"
+      )
     }
-    if (verbose) cat("allelematch:  running amUnique() at", length(matchThreshold), "different values of", profileType, "\n")
-    
-    profileResults <- data.frame(matchThreshold=NA, cutHeight=NA, alleleMismatch=NA, samples=NA, unique=NA, unclassified=NA, multipleMatch=NA, guessOptimum=NA)
-    
+
+    profileResults <-
+      data.frame(
+        matchThreshold = NA,
+        cutHeight = NA,
+        alleleMismatch = NA,
+        samples = NA,
+        unique = NA,
+        unclassified = NA,
+        multipleMatch = NA,
+        guessOptimum = NA
+      )
+
     for (i in 1:length(matchThreshold)) {
-        if (verbose) cat("allelematch:  ", i, " of ", length(matchThreshold), " (matchThreshold=", round(matchThreshold[i],2), ", cutHeight=", round(cutHeight[i],2), ", alleleMismatch=", alleleMismatch[i], ")\n", sep="")
-        profileResults[i, "matchThreshold"] <- matchThreshold[i]
-        profileResults[i, "cutHeight"] <- cutHeight[i]
-        profileResults[i, "alleleMismatch"] <- alleleMismatch[i]
-        amUniqueResult <- amUnique(amDatasetFocal, matchThreshold=matchThreshold[i], multilocusMap=multilocusMap, verbose=FALSE)
-        profileResults[i, "unclassified"] <- amUniqueResult$numUnclassified
-        profileResults[i, "multipleMatch"] <- amUniqueResult$numMultipleMatch
-        profileResults[i, "unique"] <- amUniqueResult$focalDatasetN
-        profileResults[i, "samples"] <- amUniqueResult$comparisonDatasetN
-        profileResults[i, "guessOptimum"] <- NA
+      if (verbose)
+        cat(
+          "allelematch:  ",
+          i,
+          " of ",
+          length(matchThreshold),
+          " (matchThreshold=",
+          round(matchThreshold[i], 2),
+          ", cutHeight=",
+          round(cutHeight[i], 2),
+          ", alleleMismatch=",
+          alleleMismatch[i],
+          ")\n",
+          sep = ""
+        )
+      profileResults[i, "matchThreshold"] <- matchThreshold[i]
+      profileResults[i, "cutHeight"] <- cutHeight[i]
+      profileResults[i, "alleleMismatch"] <- alleleMismatch[i]
+      amUniqueResult <-
+        amUnique(
+          amDatasetFocal,
+          matchThreshold = matchThreshold[i],
+          # minComparableLoci = minComparableLoci, # TODO
+          multilocusMap = multilocusMap,
+          verbose = FALSE
+        )
+      profileResults[i, "unclassified"] <-
+        amUniqueResult$numUnclassified
+      profileResults[i, "multipleMatch"] <-
+        amUniqueResult$numMultipleMatch
+      profileResults[i, "unique"] <- amUniqueResult$focalDatasetN
+      profileResults[i, "samples"] <-
+        amUniqueResult$comparisonDatasetN
+      profileResults[i, "guessOptimum"] <- NA
     }
-    profileResults <- profileResults[order(matchThreshold, decreasing=TRUE), ]
-    
+    profileResults <-
+      profileResults[order(matchThreshold, decreasing = TRUE), ]
+
     if (guessOptimum) {
-        
-        LeftTrimZero <- function(trimString) {
-            oldString <- trimString
-            repeat {
-                newString <- sub("^0", "", oldString)
-                if (newString == oldString) break   
-                oldString <- newString
-            }
-            return(newString)
-        }
-    
-        ## Guess the second minimum...if it exists
-        i <- 0
+      LeftTrimZero <- function(trimString) {
+        oldString <- trimString
         repeat {
-            i <- i + 1
-            minimum <- which.min(profileResults$multipleMatch[i:nrow(profileResults)])[1] + (i-1)
-            if (minimum == 1) {
-                slopeAtMinimum <- 0
-            }
-            else {
-                slopeAtMinimum <- profileResults$multipleMatch[minimum]-profileResults$multipleMatch[minimum-1]
-            }
-            if ((slopeAtMinimum < 0) || (minimum==nrow(profileResults))) break
+          newString <- sub("^0", "", oldString)
+          if (newString == oldString)
+            break
+          oldString <- newString
         }
-        secondMinimum <- minimum
-        
-        ## Guess the morphology
-        checkMultipleMatch <- LeftTrimZero(paste(profileResults$multipleMatch, collapse=""))
-        leadingZeroes <- nchar(paste(profileResults$multipleMatch, collapse="")) - nchar(checkMultipleMatch)
-        if(leadingZeroes == length(profileResults$multipleMatch)) {
-            profileMorphology <- "ZeroFlat"
-        }
-        else if (sum(profileResults$multipleMatch[(leadingZeroes+1):length(profileResults$multipleMatch)]==0)==0) {
-            if (secondMinimum==length(profileResults$multipleMatch)) {
-                profileMorphology <- "NoSecondMinimum"
-            }
-            else {
-                profileMorphology <- "NonZeroSecondMinimum"
-            }
-        }
-        else {
-           profileMorphology <- "ZeroSecondMinimum"
-        }
-        
-        ## Guess the optimal parameter value using a different approach depending on morphology
-        if (profileMorphology %in% c("ZeroFlat", "NoSecondMinimum")) {
-            guessOptimum <- which.min(abs(sapply(2:(length(profileResults$unique)-1), function(x) (profileResults$unique[x-1]-profileResults$unique[x+1])/2)))+1
-        }
-        else {
-            guessOptimum <- secondMinimum
-        }
-        
-        profileResults$missingDataLoad <- round(sum(amDatasetFocal$multilocus==amDatasetFocal$missingCode)/length(amDatasetFocal$multilocus),3)
-        profileResults$allelicDiversity <- round(mean(unlist(lapply(amUniqueResult$alleleFreq$loci, function(x) x$numAlleles))), 1)
-        profileResults$guessOptimum <- rep(FALSE, nrow(profileResults))
-        profileResults$guessOptimum[guessOptimum] <- TRUE
-        profileResults$guessMorphology <- profileMorphology
+        return(newString)
+      }
 
-        
-        if (verbose) {
-            cat("allelematch:  missing data load for input dataset is", profileResults$missingDataLoad[1], "\n")
-            cat("allelematch:  allelic diversity for input dataset is", profileResults$allelicDiversity[1], "\n")
-            cat("allelematch:  Best guess for optimal parameter at alleleMismatch=",
-                profileResults$alleleMismatch[guessOptimum],
-                " OR matchThreshold=",
-                profileResults$matchThreshold[guessOptimum],
-                " OR cutHeight=",
-                profileResults$cutHeight[guessOptimum], "\n", sep="")
-            cat("allelematch:  Best guess for unique profile morphology: ", profileMorphology, "\n", sep="")
-            if (profileMorphology %in% c("NonZeroSecondMinimum", "NoSecondMinimum")) {
-                cat("allelematch:  Use extra caution.  Detection of optimal parameter is more error prone with this morphology.\n")
-            }
+      ## Guess the second minimum...if it exists
+      i <- 0
+      repeat {
+        i <- i + 1
+        minimum <-
+          which.min(profileResults$multipleMatch[i:nrow(profileResults)])[1] + (i -
+                                                                                  1)
+        if (minimum == 1) {
+          slopeAtMinimum <- 0
+        } else {
+          slopeAtMinimum <-
+            profileResults$multipleMatch[minimum] - profileResults$multipleMatch[minimum -
+                                                                                   1]
         }
+        if ((slopeAtMinimum < 0) ||
+            (minimum == nrow(profileResults)))
+          break
+      }
+      secondMinimum <- minimum
+
+      ## Guess the morphology
+      checkMultipleMatch <-
+        LeftTrimZero(paste(profileResults$multipleMatch, collapse = ""))
+      leadingZeroes <-
+        nchar(paste(profileResults$multipleMatch, collapse = "")) - nchar(checkMultipleMatch)
+      if (leadingZeroes == length(profileResults$multipleMatch)) {
+        profileMorphology <- "ZeroFlat"
+      } else if (sum(profileResults$multipleMatch[(leadingZeroes + 1):length(profileResults$multipleMatch)] ==
+                   0) == 0) {
+        if (secondMinimum == length(profileResults$multipleMatch)) {
+          profileMorphology <- "NoSecondMinimum"
+        } else {
+          profileMorphology <- "NonZeroSecondMinimum"
+        }
+      } else {
+        profileMorphology <- "ZeroSecondMinimum"
+      }
+
+      ## Guess the optimal parameter value using a different approach depending on morphology
+      if (profileMorphology %in% c("ZeroFlat", "NoSecondMinimum")) {
+        guessOptimum <-
+          which.min(abs(sapply(2:(length(profileResults$unique) - 1), function(x)
+            (profileResults$unique[x - 1] - profileResults$unique[x + 1]) / 2))) +
+          1
+      } else {
+        guessOptimum <- secondMinimum
+      }
+
+      profileResults$missingDataLoad <-
+        round(
+          sum(amDatasetFocal$multilocus == amDatasetFocal$missingCode) / length(amDatasetFocal$multilocus),
+          3
+        )
+      profileResults$allelicDiversity <-
+        round(mean(unlist(
+          lapply(amUniqueResult$alleleFreq$loci, function(x)
+            x$numAlleles)
+        )), 1)
+      profileResults$guessOptimum <-
+        rep(FALSE, nrow(profileResults))
+      profileResults$guessOptimum[guessOptimum] <- TRUE
+      profileResults$guessMorphology <- profileMorphology
+
+
+      if (verbose) {
+        cat(
+          "allelematch:  missing data load for input dataset is",
+          profileResults$missingDataLoad[1],
+          "\n"
+        )
+        cat(
+          "allelematch:  allelic diversity for input dataset is",
+          profileResults$allelicDiversity[1],
+          "\n"
+        )
+        cat(
+          "allelematch:  Best guess for optimal parameter at alleleMismatch=",
+          profileResults$alleleMismatch[guessOptimum],
+          " OR matchThreshold=",
+          profileResults$matchThreshold[guessOptimum],
+          " OR cutHeight=",
+          profileResults$cutHeight[guessOptimum],
+          "\n",
+          sep = ""
+        )
+        cat(
+          "allelematch:  Best guess for unique profile morphology: ",
+          profileMorphology,
+          "\n",
+          sep = ""
+        )
+        if (profileMorphology %in% c("NonZeroSecondMinimum", "NoSecondMinimum")) {
+          cat(
+            "allelematch:  Use extra caution.  Detection of optimal parameter is more error prone with this morphology.\n"
+          )
+        }
+      }
     }
-    
-    if (doPlot) {
-        #dev.new()
-        graphics::layout(matrix(c(1,1,1,1,1,1,1,2,2,2), 1, 10))
-        graphics::par(mar=c(5.1, 4.1, 2, 2))
 
-        graphics::plot.default(c(min(profileResults[, profileType]), max(profileResults[, profileType])), c(0, max(profileResults[, c("unique", "unclassified", "multipleMatch")])),
-                     type="n", axes=TRUE, xlab=profileType, ylab="Count", cex=2)
-        graphics::points(profileResults[, profileType], profileResults[, "unique"], pch=19, col="red")
-        graphics::lines(profileResults[, profileType], profileResults[, "unique"], lwd=2, lty="solid", col="red")
-        graphics::points(profileResults[, profileType], profileResults[, "multipleMatch"], pch=22, col="black")
-        graphics::lines(profileResults[, profileType], profileResults[, "multipleMatch"], lwd=1, lty="solid", col="black")
-        graphics::points(profileResults[, profileType], profileResults[, "unclassified"], pch=24, col="black")
-        graphics::lines(profileResults[, profileType], profileResults[, "unclassified"],  lwd=1, lty="dotted", col="black")   
-        if (guessOptimum) {
-            graphics::arrows(profileResults[, profileType][which(profileResults$guessOptimum)], max(profileResults[, c("unique", "unclassified", "multipleMatch")])*0.3,
-                   profileResults[, profileType][which(profileResults$guessOptimum)], 0, length=0.15, angle=20, lwd=2)
+    if (doPlot) {
+      #dev.new()
+      graphics::layout(matrix(c(1, 1, 1, 1, 1, 1, 1, 2, 2, 2), 1, 10))
+      graphics::par(mar = c(5.1, 4.1, 2, 2))
+
+      graphics::plot.default(
+        c(min(profileResults[, profileType]), max(profileResults[, profileType])),
+        c(0, max(profileResults[, c("unique", "unclassified", "multipleMatch")])),
+        type = "n",
+        axes = TRUE,
+        xlab = profileType,
+        ylab = "Count",
+        cex = 2
+      )
+      graphics::points(profileResults[, profileType],
+                       profileResults[, "unique"],
+                       pch = 19,
+                       col = "red")
+      graphics::lines(
+        profileResults[, profileType],
+        profileResults[, "unique"],
+        lwd = 2,
+        lty = "solid",
+        col = "red"
+      )
+      graphics::points(profileResults[, profileType],
+                       profileResults[, "multipleMatch"],
+                       pch = 22,
+                       col = "black")
+      graphics::lines(
+        profileResults[, profileType],
+        profileResults[, "multipleMatch"],
+        lwd = 1,
+        lty = "solid",
+        col = "black"
+      )
+      graphics::points(profileResults[, profileType],
+                       profileResults[, "unclassified"],
+                       pch = 24,
+                       col = "black")
+      graphics::lines(
+        profileResults[, profileType],
+        profileResults[, "unclassified"],
+        lwd = 1,
+        lty = "dotted",
+        col = "black"
+      )
+      if (guessOptimum) {
+        graphics::arrows(
+          profileResults[, profileType][which(profileResults$guessOptimum)],
+          max(profileResults[, c("unique", "unclassified", "multipleMatch")]) * 0.3,
+          profileResults[, profileType][which(profileResults$guessOptimum)],
+          0,
+          length = 0.15,
+          angle = 20,
+          lwd = 2
+        )
+      }
+
+      graphics::par(mar = c(0, 0, 0, 1))
+      graphics::plot.default(
+        c(0, 100),
+        c(0, 100),
+        type = "n",
+        axes = FALSE,
+        ylab = "",
+        xlab = ""
+      )
+      graphics::text(0,
+                     100,
+                     "allelematch",
+                     cex = 2,
+                     adj = c(0, 0.5))
+      graphics::text(0,
+                     97,
+                     "amUniqueProfile()",
+                     cex = 1,
+                     adj = c(0, 0.5))
+      graphics::text(
+        0,
+        88,
+        paste(
+          "missingDataLoad=",
+          profileResults$missingDataLoad[1],
+          sep = ""
+        ),
+        cex = 1,
+        adj = c(0, 0.5)
+      )
+      graphics::text(
+        0,
+        86,
+        paste(
+          "allelicDiversity=",
+          profileResults$allelicDiversity[1],
+          sep = ""
+        ),
+        cex = 1,
+        adj = c(0, 0.5)
+      )
+      graphics::legend(
+        x = 0,
+        y = 50,
+        legend = c("unique", "multipleMatch", "unclassified"),
+        lwd = c(2, 1, 1),
+        lty = c("solid", "solid", "dotted"),
+        col = c("red", "black", "black"),
+        pch = c(19, 22, 24)
+      )
+      if (guessOptimum) {
+        graphics::text(0,
+                       35,
+                       "Best guess for optimum:",
+                       cex = 1,
+                       adj = c(0, 0.5))
+        graphics::text(
+          0,
+          33,
+          paste(profileType, "=", signif(profileResults[, profileType][which(profileResults$guessOptimum)], 2), sep =
+                  ""),
+          cex = 1,
+          adj = c(0, 0.5)
+        )
+        graphics::text(0,
+                       25,
+                       "Profile morphology:",
+                       cex = 1,
+                       adj = c(0, 0.5))
+        graphics::text(0,
+                       23,
+                       profileMorphology,
+                       cex = 1,
+                       adj = c(0, 0.5))
+        if (profileMorphology %in% c("NonZeroSecondMinimum", "NoSecondMinimum")) {
+          graphics::text(
+            0,
+            21,
+            "Caution with optimum",
+            col = "red",
+            cex = 1,
+            adj = c(0, 0.5)
+          )
         }
-        
-        graphics::par(mar=c(0,0,0,1))
-        graphics::plot.default(c(0,100), c(0,100), type="n", axes=FALSE, ylab="", xlab="")
-        graphics::text(0, 100, "allelematch", cex=2, adj=c(0,0.5))
-        graphics::text(0, 97, "amUniqueProfile()", cex=1, adj=c(0,0.5))
-        graphics::text(0, 88, paste("missingDataLoad=", profileResults$missingDataLoad[1], sep=""), cex=1, adj=c(0,0.5))
-        graphics::text(0, 86, paste("allelicDiversity=", profileResults$allelicDiversity[1], sep=""), cex=1, adj=c(0,0.5))
-        graphics::legend(x=0, y=50, legend=c("unique", "multipleMatch", "unclassified"), lwd=c(2, 1, 1), lty=c("solid", "solid", "dotted"), col=c("red", "black", "black"), pch=c(19, 22, 24))
-        if (guessOptimum) {
-            graphics::text(0, 35, "Best guess for optimum:", cex=1, adj=c(0,0.5))
-            graphics::text(0, 33, paste(profileType, "=", signif(profileResults[, profileType][which(profileResults$guessOptimum)], 2), sep=""), cex=1, adj=c(0, 0.5))
-            graphics::text(0, 25, "Profile morphology:", cex=1, adj=c(0,0.5))
-            graphics::text(0, 23, profileMorphology, cex=1, adj=c(0, 0.5))
-            if (profileMorphology %in% c("NonZeroSecondMinimum", "NoSecondMinimum")) {
-                graphics::text(0, 21, "Caution with optimum", col="red", cex=1, adj=c(0, 0.5))
-            }
-        }  
-    }    
-        
+      }
+    }
+
     return(profileResults)
-} 
+  }
+
 
 
 ##
@@ -3821,7 +4117,4 @@ amCSV.amUnique <- function(x, csvFile, uniqueOnly=FALSE) {
         utils::write.csv(csvTable, file=csvFile, row.names=FALSE)
     }
 }
-
-
-
 
