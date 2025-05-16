@@ -1872,42 +1872,68 @@ amUniqueProfile <-
            consensusMethod = 1,
            verbose = TRUE) {
     if (!inherits(amDatasetFocal, "amDataset")) {
-        stop("allelematch:  amDatasetFocal must be an object of class \"amDataset\"", call. = FALSE)
+      stop("allelematch:  amDatasetFocal must be an object of class \"amDataset\"",
+           call. = FALSE)
     }
     
     # Set multilocusMap to default if not given
     if (is.null(multilocusMap)) {
-        if ((ncol(amDatasetFocal$multilocus)%%2) != 0) {
-            stop("allelematch:  there are an odd number of genotype columns in amDatasetFocal; Please specify multilocusMap manually", call. = FALSE)
-        }
-        else cat("allelematch:  assuming genotype columns are in pairs, representing", ncol(amDatasetFocal$multilocus)/2, "loci\n")
-        multilocusMap <- rep(1:(ncol(amDatasetFocal$multilocus)/2), each=2)
-    }
+      if ((ncol(amDatasetFocal$multilocus)%%2) != 0) {
+        stop(
+          "allelematch:  there are an odd number of genotype columns in amDatasetFocal; Please specify multilocusMap manually",
+          call. = FALSE
+        )
+      } else
+        cat(
+          "allelematch:  assuming genotype columns are in pairs, representing",
+          ncol(amDatasetFocal$multilocus) / 2,
+          "loci\n"
+        )
+      multilocusMap <-
+        rep(1:(ncol(amDatasetFocal$multilocus) / 2), each = 2)
     ## Check multilocusMap is the correct length
-    else if (length(multilocusMap) != ncol(amDatasetFocal$multilocus))  {
-        stop("allelematch:  multilocusMap must be a vector of integers or strings giving the mappings onto loci for all genotype columns in amDatasetFocal;
+    } else if (length(multilocusMap) != ncol(amDatasetFocal$multilocus))  {
+        stop(
+        "allelematch:  multilocusMap must be a vector of integers or strings giving the mappings onto loci for all genotype columns in amDatasetFocal;
              Example: gender followed by 4 diploid loci in paired columns could be coded: mutlilocusMap=c(1,2,2,3,3,4,4,5,5)
-             or as: multilocusMap=c(\"GENDER\",\"LOC1\",\"LOC1\",\"LOC2\",\"LOC2\",\"LOC3\",\"LOC3\",\"LOC4\",\"LOC4\")", call. = FALSE)
-    }
-    else if (sum(table(multilocusMap) > 2) > 0) {
-        stop("allelematch:  multilocusMap indicates that a locus occurs in three or more columns;  this situation is not yet handled", call. = FALSE)
+             or as: multilocusMap=c(\"GENDER\",\"LOC1\",\"LOC1\",\"LOC2\",\"LOC2\",\"LOC3\",\"LOC3\",\"LOC4\",\"LOC4\")",
+        call. = FALSE
+      )
+    } else if (sum(table(multilocusMap) > 2) > 0) {
+      stop(
+        "allelematch:  multilocusMap indicates that a locus occurs in three or more columns;  this situation is not yet handled",
+        call. = FALSE
+      )
     }
     multilocusMap <- as.integer(as.factor(multilocusMap))
 
     ## More checking of input parameters
-    if (sum(!(c(is.null(alleleMismatch), is.null(matchThreshold), is.null(cutHeight)))) > 1) {
-        stop("allelematch:  please specify alleleMismatch OR matchThreshold OR cutHeight.", call. = FALSE)
+    if (sum(!(c(
+      is.null(alleleMismatch),
+      is.null(matchThreshold),
+      is.null(cutHeight)
+    ))) > 1) {
+      stop(
+        "allelematch:  please specify alleleMismatch OR matchThreshold OR cutHeight.",
+        call. = FALSE
+      )
     }
     
-    if (sum(!(c(is.null(alleleMismatch), is.null(matchThreshold), is.null(cutHeight))))==0) {
+    if (sum(!(c(
+      is.null(alleleMismatch),
+      is.null(matchThreshold),
+      is.null(cutHeight)
+    ))) == 0) {
         alleleMismatch <- seq(0, floor(length(multilocusMap))*0.4, 1)
         matchThreshold <- 1-(alleleMismatch/length(multilocusMap))
         cutHeight <- 1-matchThreshold
         profileType <- "alleleMismatch"
-    }
-    else {
+    } else {
         if (length(c(alleleMismatch, matchThreshold, cutHeight))<2) {
-            stop("allelematch:  please provide a range of parameter values for alleleMismatch OR matchThreshold OR cutHeight.  e.g. alleleMismatch=c(0,1,2,3,4,5,6,7,8)", call. = FALSE)
+        stop(
+          "allelematch:  please provide a range of parameter values for alleleMismatch OR matchThreshold OR cutHeight.  e.g. alleleMismatch=c(0,1,2,3,4,5,6,7,8)",
+          call. = FALSE
+        )
         }
     
         if (!is.null(alleleMismatch)) {
