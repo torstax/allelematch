@@ -288,127 +288,6 @@ amMatrix <- function(amDatasetFocal, missingMethod = 2, minComparableLoci=0) {
 }
 
 
-#### amSimilarityScore() ####
-## Returns a similarity matris with a similarity score for every genotype match.
-##
-## In each genotype match, every matching allele (X=X and Y=Y) increases
-## the similarity by 1 and each mismatch (X!=Y and Y!=X) increases similarity by 0.
-##
-## Parameter missingMethod controls how allele positions with missing data
-## affects similarity.
-##
-## This parameter also effects how the average similarity scores
-## for each genotype comparison is calculated.
-##
-## This calculation is done differently depending on the
-##   - The number of comparable positions (positions without missing data)
-##     in the current genotype matching (see missingMethod=0 below)
-##   - The total number of allele positions in the genotype
-##     (see missingMethod 1 and 2 below).
-##
-## minComparableLoci : If this parameter is set, TODO
-##
-## missingMethod=0 increases similarity by 0 for any comparisons that does not
-##  compare two valid data (X or Y as opposed to -99 or NA)
-##
-##  The average is then calculated by dividing the accumulated similarity
-##  by the number of allele positions that could be compared
-##  (rather than the total numbers of allele positions)
-##
-## missingMethod=1 and missingMethod=2 assigns none-zero similarity to matches that include missing data.
-##
-##  The average is calculated by dividing by the total number of allele columns in the genotype.
-##
-##  Note that missingMethod==1 (=> missingMultiplier==0.5) matches the algorithm
-##  that is described in chapter 2.1, page 3, step 1 of the vignette at
-##  https://cran.r-project.org/web/packages/allelematch/vignettes/allelematchSuppDoc.pdf
-##
-amSimilarityScore <-
-  function(focalGenotypes,
-           comparisonGenotypes=focalGenotypes,
-           multilocusMap = NULL,
-           minComparableLoci = 0,
-           missingMethod=2) {
-  startTime <- Sys.time() # This method is a hot-spot. Measure how log it takes to execute.
-
-  # Assert that the parameters have been vetted
-  # in the exported interface functions
-  # that call this internal function:
-  stopifnot(ncol(focalGenotypes) == ncol(comparisonGenotypes)) # TODO: Is this allowed?
-  stopifnot(minComparableLoci >= 0)
-  stopifnot(missingMethod == 1 || missingMethod == 2)
-
-  # Default if not passed:
-  if (minComparableLoci != 0) {
-    multilocusMap = amFixMultilocusMap(ncol(focalGenotypes), multilocusMap)
-    stopifnot(length(multilocusMap) == ncol(focalGenotypes))
-  }
-
-  # Count the number of loci in the map. Typically alleleCount / 2:
-  lociCount = length(unique(multilocusMap))
-  if (minComparableLoci < 0 || minComparableLoci > lociCount)
-    stop("allelematch:  minComparableLoci must be between 0 and total number of loci (", lociCount, ")",
-         call. = TRUE)
-
-  numFocalGenotypes      <- nrow(focalGenotypes)
-  numComparisonGenotypes <- nrow(comparisonGenotypes)
-
-  alleleCount <- ncol(focalGenotypes) # Number of alleles to compare
-  if (ncol(focalGenotypes) != ncol(comparisonGenotypes)) {
-    # TODO: Is this allowed?
-    cat("allelematch: amSimilarityScore: Hmm. ncol(focalGenotypes)=", ncol(focalGenotypes), " != ncol(comparisonGenotypes)=", ncol(comparisonGenotypes), sep="")
-  }
-
-  ## Empty data structures to store results
-  simMatrix <- matrix(, nrow=numFocalGenotypes, ncol=numComparisonGenotypes)
-  pairwiseMatches <- vector("list", numFocalGenotypes)
-
-  ## Determine allele similarity score, fastest version + counting NA after comparison
-  for (i in 1:numFocalGenotypes) {
-    # Compare the current row in focalGenotype with all rows in comparisonGenotypes:
-    focalGenotypeI<- focalGenotypes[rep(i, numComparisonGenotypes),] # Duplicate row i to compare it with all rows in comparisonGenotypes
-    comparedRows  <- focalGenotypeI==comparisonGenotypes # Change to TRUE where both are same, FALSE where different, NA where one or both are NA
-    sumsMatching  <- rowSums(comparedRows, na.rm=TRUE)   # Count the number of TRUE (but not FALSE or NA) in each comparedRow
-
-    if (missingMethod==0) {
-      # How many columns/alleles could be compared without any NA data?
-      sumsComparable  <- rowSums(!is.na(comparedRows)) # Count the number of TRUE and FALSE (but not NA) in each comparedRow.
-      # sumsComparableOk<- as.double(sumsComparable >= minComparableLoci)
-
-      # sumsMissing     <- rowSums(is.na(comparedRows)) # * missingMultiplier
-      # sumsMatching    <- sumsMatching + (sumsMissing*missingMultiplier)     # Assume positions with missing data to match ...
-      # sumsMatching    <- sumsMatching * sumsComparableOk # ... but disqualify any compared pair that doesn't have enough comparable values
-
-      simMatrix[i,]   <- as.double(sumsMatching) / sumsComparable      # Divide the number of matches by the number of comparable alleles (i.e. don't count alleles with missing data)
-
-      if (minComparableLoci > 0) {
-        # Disqualify any genotype pair comparison that doesn't have enough comparable values:
-        simMatrix[i,] <- replace(simMatrix[i,], sumsComparable < minComparableAlleles, 0)
-      }
-    } else {
-      # Calculate the similarity of comparisons with missing values:
-      if (missingMethod==1) missingMultiplier <- 0.25 else missingMultiplier <- 0.5
-      sumsMissing     <- rowSums(is.na(comparisonGenotypes) * missingMultiplier) + sum(is.na(focalGenotypes[i,]) * missingMultiplier)
-
-      simMatrix[i,]   <- as.double(sumsMatching + sumsMissing) / alleleCount
-
-      if (minComparableLoci > 0) {
-        # Disqualify any genotype pair comparison that doesn't have enough comparable values:
-        sumsComparable  <- rowSums(!is.na(comparedRows)) # Count the number of TRUE and FALSE (but not NA) in each comparedRow.
-        simMatrix[i,] <- replace(simMatrix[i,], sumsComparable < minComparableAlleles, 0) # TODO: THIS IS WRONG!!
-      }
-    }
-
-  }
-
-  endTime <- Sys.time()
-  if (FALSE) cat("    amSimilarityScore:", numFocalGenotypes, "x", numComparisonGenotypes, "duration: ")
-  if (FALSE) print(endTime-startTime)
-
-  return(simMatrix)
-  }
-
-
 #### amPairwise() ####
 amPairwise <-
   function(amDatasetFocal,
@@ -4423,6 +4302,129 @@ amCSV.amUnique <- function(x, csvFile, uniqueOnly = FALSE) {
 
 
 #### Internal utility functions. Not exported.  ####
+
+
+
+#### amSimilarityScore() ####
+## Returns a similarity matris with a similarity score for every genotype match.
+##
+## In each genotype match, every matching allele (X=X and Y=Y) increases
+## the similarity by 1 and each mismatch (X!=Y and Y!=X) increases similarity by 0.
+##
+## Parameter missingMethod controls how allele positions with missing data
+## affects similarity.
+##
+## This parameter also effects how the average similarity scores
+## for each genotype comparison is calculated.
+##
+## This calculation is done differently depending on the
+##   - The number of comparable positions (positions without missing data)
+##     in the current genotype matching (see missingMethod=0 below)
+##   - The total number of allele positions in the genotype
+##     (see missingMethod 1 and 2 below).
+##
+## minComparableLoci : If this parameter is set, TODO
+##
+## missingMethod=0 increases similarity by 0 for any comparisons that does not
+##  compare two valid data (X or Y as opposed to -99 or NA)
+##
+##  The average is then calculated by dividing the accumulated similarity
+##  by the number of allele positions that could be compared
+##  (rather than the total numbers of allele positions)
+##
+## missingMethod=1 and missingMethod=2 assigns none-zero similarity to matches that include missing data.
+##
+##  The average is calculated by dividing by the total number of allele columns in the genotype.
+##
+##  Note that missingMethod==1 (=> missingMultiplier==0.5) matches the algorithm
+##  that is described in chapter 2.1, page 3, step 1 of the vignette at
+##  https://cran.r-project.org/web/packages/allelematch/vignettes/allelematchSuppDoc.pdf
+##
+amSimilarityScore <-
+  function(focalGenotypes,
+           comparisonGenotypes=focalGenotypes,
+           multilocusMap = NULL,
+           minComparableLoci = 0,
+           missingMethod=2) {
+    startTime <- Sys.time() # This method is a hot-spot. Measure how log it takes to execute.
+
+    # Assert that the parameters have been vetted
+    # in the exported interface functions
+    # that call this internal function:
+    stopifnot(ncol(focalGenotypes) == ncol(comparisonGenotypes)) # TODO: Is this allowed?
+    stopifnot(minComparableLoci >= 0)
+    stopifnot(missingMethod == 1 || missingMethod == 2)
+
+    # Default if not passed:
+    if (minComparableLoci != 0) {
+      multilocusMap = amFixMultilocusMap(ncol(focalGenotypes), multilocusMap)
+      stopifnot(length(multilocusMap) == ncol(focalGenotypes))
+    }
+
+    # Count the number of loci in the map. Typically alleleCount / 2:
+    lociCount = length(unique(multilocusMap))
+    if (minComparableLoci < 0 || minComparableLoci > lociCount)
+      stop("allelematch:  minComparableLoci must be between 0 and total number of loci (", lociCount, ")",
+           call. = TRUE)
+
+    numFocalGenotypes      <- nrow(focalGenotypes)
+    numComparisonGenotypes <- nrow(comparisonGenotypes)
+
+    alleleCount <- ncol(focalGenotypes) # Number of alleles to compare
+    if (ncol(focalGenotypes) != ncol(comparisonGenotypes)) {
+      # TODO: Is this allowed?
+      cat("allelematch: amSimilarityScore: Hmm. ncol(focalGenotypes)=", ncol(focalGenotypes), " != ncol(comparisonGenotypes)=", ncol(comparisonGenotypes), sep="")
+    }
+
+    ## Empty data structures to store results
+    simMatrix <- matrix(, nrow=numFocalGenotypes, ncol=numComparisonGenotypes)
+    pairwiseMatches <- vector("list", numFocalGenotypes)
+
+    ## Determine allele similarity score, fastest version + counting NA after comparison
+    for (i in 1:numFocalGenotypes) {
+      # Compare the current row in focalGenotype with all rows in comparisonGenotypes:
+      focalGenotypeI<- focalGenotypes[rep(i, numComparisonGenotypes),] # Duplicate row i to compare it with all rows in comparisonGenotypes
+      comparedRows  <- focalGenotypeI==comparisonGenotypes # Change to TRUE where both are same, FALSE where different, NA where one or both are NA
+      sumsMatching  <- rowSums(comparedRows, na.rm=TRUE)   # Count the number of TRUE (but not FALSE or NA) in each comparedRow
+
+      if (missingMethod==0) {
+        # How many columns/alleles could be compared without any NA data?
+        sumsComparable  <- rowSums(!is.na(comparedRows)) # Count the number of TRUE and FALSE (but not NA) in each comparedRow.
+        # sumsComparableOk<- as.double(sumsComparable >= minComparableLoci)
+
+        # sumsMissing     <- rowSums(is.na(comparedRows)) # * missingMultiplier
+        # sumsMatching    <- sumsMatching + (sumsMissing*missingMultiplier)     # Assume positions with missing data to match ...
+        # sumsMatching    <- sumsMatching * sumsComparableOk # ... but disqualify any compared pair that doesn't have enough comparable values
+
+        simMatrix[i,]   <- as.double(sumsMatching) / sumsComparable      # Divide the number of matches by the number of comparable alleles (i.e. don't count alleles with missing data)
+
+        if (minComparableLoci > 0) {
+          # Disqualify any genotype pair comparison that doesn't have enough comparable values:
+          simMatrix[i,] <- replace(simMatrix[i,], sumsComparable < minComparableAlleles, 0)
+        }
+      } else {
+        # Calculate the similarity of comparisons with missing values:
+        if (missingMethod==1) missingMultiplier <- 0.25 else missingMultiplier <- 0.5
+        sumsMissing     <- rowSums(is.na(comparisonGenotypes) * missingMultiplier) + sum(is.na(focalGenotypes[i,]) * missingMultiplier)
+
+        simMatrix[i,]   <- as.double(sumsMatching + sumsMissing) / alleleCount
+
+        if (minComparableLoci > 0) {
+          # Disqualify any genotype pair comparison that doesn't have enough comparable values:
+          sumsComparable  <- rowSums(!is.na(comparedRows)) # Count the number of TRUE and FALSE (but not NA) in each comparedRow.
+          simMatrix[i,] <- replace(simMatrix[i,], sumsComparable < minComparableAlleles, 0) # TODO: THIS IS WRONG!!
+        }
+      }
+
+    }
+
+    endTime <- Sys.time()
+    if (FALSE) cat("    amSimilarityScore:", numFocalGenotypes, "x", numComparisonGenotypes, "duration: ")
+    if (FALSE) print(endTime-startTime)
+
+    return(simMatrix)
+  }
+
 
 
 #### amLimits() ####
