@@ -4305,7 +4305,7 @@ amCSV.amUnique <- function(x, csvFile, uniqueOnly = FALSE) {
 
 
 
-#### amSimilarityScore() ####
+#### amSimilarityScore() ###
 ## Returns a similarity matris with a similarity score for every genotype match.
 ##
 ## In each genotype match, every matching allele (X=X and Y=Y) increases
@@ -4427,29 +4427,33 @@ amSimilarityScore <-
 
 
 
-#### amLimits() ####
+#### amLimits() ###
 ##
 ## For internal use. Checks the parameters and calculates the
 ## relations between alleleMismatch, matchThreshold and cutHeight.
 ##
 amLimits <-
-  function(minComparableLoci = 0,
-           alleleMismatch = NULL,
+  function(alleleMismatch = NULL,
            matchThreshold = NULL,
            cutHeight = NULL,
-           missingMethod = 2) {
+           alleleCount = NULL,
+           minComparableLoci = 0,
+           missingMethod = 2,
+           verbose = FALSE) {
 
     ## Create amLimits object
     newLimits <- list()
     class(newLimits) <- "amLimits"
 
     ## Checking of input parameters
-    if (!is.integer(minComparableLoci) || minComparableLoci < 0) {
+    if (minComparableLoci < 0) {
       stop(
         "allelematch:  please specify minComparableLoci to be integer in the range 0 to the number of locus in the amData locusMap.",
         call. = FALSE
       )
     }
+    if (!(missingMethod %in% c(1, 2)))
+     stop("allelematch:  missingMethod must equal 1 or 2", call. = FALSE)
 
     ## More checking of input parameters
     if (sum(!(c(
@@ -4470,6 +4474,13 @@ amLimits <-
       )
     }
 
+    if (is.null(alleleCount)) {
+      stop("allelematch:  please provide alleleCount, i.e. number of data columns,\n                      for the conversions between alleleMismatch, matchThreshold and cutHeight\n",
+           call. = FALSE)
+
+    }
+
+    # Use the supplied parameter to calculate the others:
     if (!is.null(matchThreshold)) {
       if ((matchThreshold < 0) || (matchThreshold > 1)) {
         stop("allelematch:  matchThreshold must be between 0 and 1",
@@ -4477,9 +4488,9 @@ amLimits <-
       }
       cutHeight <- 1 - matchThreshold
       alleleMismatch <-
-        round((1 - matchThreshold) * length(multilocusMap), 2)
+        round((1 - matchThreshold) * alleleCount, 2)
     } else if (!is.null(alleleMismatch)) {
-      matchThreshold <- 1 - (alleleMismatch / length(multilocusMap))
+      matchThreshold <- 1 - (alleleMismatch / alleleCount)
       cutHeight <- 1 - matchThreshold
     } else if (!is.null(cutHeight)) {
       if ((cutHeight < 0) || (cutHeight > 1)) {
@@ -4488,7 +4499,7 @@ amLimits <-
       }
       matchThreshold <- 1 - cutHeight
       alleleMismatch <-
-        round((1 - matchThreshold) * length(multilocusMap), 2)
+        round((1 - matchThreshold) * alleleCount, 2)
     }
 
     if (matchThreshold == 1 && cutHeight == 0) {
