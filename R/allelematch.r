@@ -1455,63 +1455,24 @@ amUnique <-
            doPsib = "missing",
            consensusMethod = 1,
            verbose = TRUE,
-           minComparableLoci = 0) { # TODO Move up when we drop backwards compatibility. Effects calls with amUnique(ds, ...)
+           minComparableLoci = 0) { # TODO Move up when/if we drop backwards compatibility. Effects calls with amUnique(ds, ...)
+
+    ## Check input parameters
     if (!inherits(amDatasetFocal, "amDataset")) {
       stop("allelematch:  amDatasetFocal must be an object of class \"amDataset\"",
            call. = FALSE)
     }
 
-
     ## Set multilocusMap to default if not given
     multilocusMap = amFixMultilocusMap(ncol(amDatasetFocal$multilocus), multilocusMap, verbose = TRUE) # TODO verbose for 2.5.4 compatibility
 
-    ## More checking of input parameters
-    if (sum(!(c(
-      is.null(alleleMismatch),
-      is.null(matchThreshold),
-      is.null(cutHeight)
-    ))) != 1) {
-      stop(
-        "allelematch:  please specify alleleMismatch OR matchThreshold OR cutHeight.",
-        call. = FALSE
-      )
-    }
-
-    if (length(c(alleleMismatch, matchThreshold, cutHeight)) > 1) {
-      stop(
-        "allelematch:  please provide a single parameter value for alleleMismatch OR matchThreshold OR cutHeight.  Use amUniqueProfile() to examine a range of values",
-        call. = FALSE
-      )
-    }
-
-    if (!is.null(matchThreshold)) {
-      if ((matchThreshold < 0) || (matchThreshold > 1)) {
-        stop("allelematch:  matchThreshold must be between 0 and 1",
-             call. = FALSE)
-      }
-      cutHeight <- 1 - matchThreshold
-      alleleMismatch <-
-        round((1 - matchThreshold) * length(multilocusMap), 2)
-    } else if (!is.null(alleleMismatch)) {
-      matchThreshold <- 1 - (alleleMismatch / length(multilocusMap))
-      cutHeight <- 1 - matchThreshold
-    } else if (!is.null(cutHeight)) {
-      if ((cutHeight < 0) || (cutHeight > 1)) {
-        stop("allelematch:  cutHeight must be greater than 0 and less than 1",
-             call. = FALSE)
-      }
-      matchThreshold <- 1 - cutHeight
-      alleleMismatch <-
-        round((1 - matchThreshold) * length(multilocusMap), 2)
-    }
-
-    if (matchThreshold == 1 && cutHeight == 0) {
-      if (verbose)
-        cat(
-          "allelematch: cutHeight cannot be zero.  Setting cutHeight=0.00001.  This will return perfect matches.\n"
-        )
-      cutHeight <- 0.00001
-    }
+    # Validate and calculate limit parameters:
+    lim = amLimits(alleleMismatch = alleleMismatch,
+                   matchThreshold = matchThreshold,
+                   cutHeight      = cutHeight,
+                   alleleCount = ncol(amDatasetFocal$multilocus),
+                   minComparableLoci = minComparableLoci)
+    alleleMismatch = matchThreshold = cutHeight = NULL # Use lim$XXX values instead
 
     ## Run the required analyses
     if (verbose)
@@ -1519,7 +1480,7 @@ amUnique <-
     clusterAnalysis <-
       amCluster(
         amDatasetFocal,
-        cutHeight = cutHeight,
+        cutHeight = lim$cutHeight,
         minComparableLoci = minComparableLoci,
         runUntilSingletons = TRUE,
         consensusMethod = consensusMethod
@@ -1530,7 +1491,7 @@ amUnique <-
         "allelematch:  amUnique:  Comparing unique genotypes identified by clustering to all samples\n"
       )
     clusterAnalysisPairwise <-
-      amPairwise(clusterAnalysis$unique, amDatasetFocal, matchThreshold = matchThreshold)
+      amPairwise(clusterAnalysis$unique, amDatasetFocal, matchThreshold = lim$matchThreshold)
 
     if (verbose)
       cat(
@@ -1703,10 +1664,10 @@ amUnique <-
 
 
     ## Add in other reference items involved in the analysis
-    uniqueAnalysis$cutHeight <- cutHeight
+    uniqueAnalysis$cutHeight <- lim$cutHeight
     uniqueAnalysis$consensusMethod <-
       clusterAnalysis$consensusMethod
-    uniqueAnalysis$alleleMismatch <- alleleMismatch
+    uniqueAnalysis$alleleMismatch <- lim$alleleMismatch
     uniqueAnalysis$doPsib <- doPsib
     uniqueAnalysis$alleleFreq <- clusterAnalysisAlleleFreq
 
@@ -1730,6 +1691,8 @@ amUniqueProfile <-
            doPlot = TRUE,
            consensusMethod = 1,
            verbose = TRUE) {
+
+    # Check parameters:
     if (!inherits(amDatasetFocal, "amDataset")) {
       stop("allelematch:  amDatasetFocal must be an object of class \"amDataset\"",
            call. = FALSE)
