@@ -304,40 +304,14 @@ amPairwise <-
         call. = FALSE
       )
     }
-    if (!is.null(minComparableLoci)) { } # TODO validate!
-    if (!(missingMethod %in% c(1, 2)))
-      stop("allelematch:  missingMethod must equal 1 or 2", call. = FALSE)
 
-    ## More checking of input parameters
-    if (sum(!(c(
-      is.null(alleleMismatch), is.null(matchThreshold)
-    ))) != 1) {
-      stop("allelematch:  please specify alleleMismatch OR matchThreshold.",
-           call. = FALSE)
-    }
-    if (length(c(alleleMismatch, matchThreshold)) > 1) {
-      stop(
-        "allelematch:  please provide a single parameter value for alleleMismatch OR matchThreshold.",
-        call. = FALSE
-      )
-    }
-
-    if (!is.null(matchThreshold)) {
-      if ((matchThreshold < 0) || (matchThreshold > 1)) {
-        stop("allelematch:  matchThreshold must be between 0 and 1",
-             call. = FALSE)
-      }
-      alleleMismatch <-
-        round((1 - matchThreshold) * ncol(amDatasetFocal$multilocus), 2)
-    }
-    else if (!is.null(alleleMismatch)) {
-        if ((alleleMismatch < 0) || (alleleMismatch > ncol(amDatasetFocal$multilocus))) {
-                # TODO: Guard against matchThreshold becoming negative!
-                # stop("allelematch:  alleleMismatch (", alleleMismatch, ") must be positive and smaller than the number of alleles (", ncol(amDatasetFocal$multilocus), ")", call. = FALSE)
-            }
-      matchThreshold <-
-        1 - (alleleMismatch / ncol(amDatasetFocal$multilocus))
-    }
+    # Validate and calculate limit parameters:
+    lim = amLimits(alleleMismatch = alleleMismatch,
+                   matchThreshold = matchThreshold,
+                   cutHeight      = NULL, # Not passed to this amPairwise function
+                   alleleCount = ncol(amDatasetFocal$multilocus),
+                   minComparableLoci = minComparableLoci,
+                   missingMethod = missingMethod)
 
     ## Put amDataset object into convenience variables
     focalGenotypes <- amDatasetFocal$multilocus
@@ -391,7 +365,7 @@ amPairwise <-
 
       ## Determine which comparison genotypes meet the threshold
       pairwiseMatchesWhich <-
-        which(simMatrix[i, ]  >= matchThreshold)
+        which(simMatrix[i, ]  >= lim$matchThreshold)
       pairwiseMatchesScores <-
         signif(simMatrix[i, pairwiseMatchesWhich], 2)
 
@@ -513,8 +487,8 @@ amPairwise <-
     amPairwise <- list()
     amPairwise$pairwise <- pairwiseMatches
     amPairwise$missingCode <- amDatasetFocal$missingCode
-    amPairwise$matchThreshold <- matchThreshold
-    amPairwise$alleleMismatch <- alleleMismatch
+    amPairwise$matchThreshold <- lim$matchThreshold
+    amPairwise$alleleMismatch <- lim$alleleMismatch
     # amPairwise$minComparableLoci    <- minComparableLoci # TODO : makes (test-allelematch_3-amPairwise.R:17:5) backwards incompatible
     amPairwise$missingMethod <- missingMethod
     amPairwise$focalDatasetN <- nrow(amDatasetFocal$multilocus)
