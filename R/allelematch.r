@@ -137,9 +137,6 @@ amDataset <-
            call. = FALSE)
     }
 
-    # Normalize the multilocusMap:
-    multilocusMap = amFixMultilocusMap(ncolData, multilocusMap)
-
     ## Prepare multilocusDataset
     columnDataset <- dimnames(multilocusDataset)[[2]]
     multilocusDataset <-
@@ -215,7 +212,6 @@ amDataset <-
       # and adds new fields.
       # We use this trick to maintain compatibility with 2.5.1 -- 2.5.4.
       newDataset$multilocusMap <- amFixMultilocusMap(ncolData, multilocusMap)
-      newDataset$lociCount = length(unique(newDataset$multilocusMap)) # Typically alleleCount/2
       class(newDataset) <- c("amDatasset2", "amDataset")
     }
 
@@ -322,7 +318,7 @@ amPairwise <-
     metaDataComparison <- amDatasetComparison$metaData
     columnNames <- dimnames(amDatasetFocal$multilocus)[[2]]
 
-    ## Check focal and comparison datasets have the same number of loci, column names, and missing cdodes
+    ## Check focal and comparison datasets have the same number of loci, column names, and missing codes
     if (ncol(focalGenotypes) != ncol(comparisonGenotypes))  {
       stop(
         "allelematch:  amDatasetFocal and amDatasetComparison must have the same number of columns / loci",
@@ -4278,7 +4274,7 @@ amCSV.amUnique <- function(x, csvFile, uniqueOnly = FALSE) {
 ##  https://cran.r-project.org/web/packages/allelematch/vignettes/allelematchSuppDoc.pdf
 ##
 amSimilarityScore <-
-  function(focalGenotypes,
+  function(focalGenotypes, # Not an amDataset. Just the amDataset$multilocus raw data
            comparisonGenotypes=focalGenotypes,
            multilocusMap = NULL,
            minComparableLoci = 0,
@@ -4298,8 +4294,9 @@ amSimilarityScore <-
       stopifnot(length(multilocusMap) == ncol(focalGenotypes))
     }
 
-    # Count the number of loci in the map. Typically alleleCount / 2:
-    lociCount = length(unique(multilocusMap))
+    # Group the alleles into the loci they share:
+    uniqueLoci = unique(multilocusMap)
+    lociCount = length(uniqueLoci) # Count the number of loci in the map. Typically alleleCount / 2:
     if (minComparableLoci < 0 || minComparableLoci > lociCount)
       stop("allelematch:  minComparableLoci must be between 0 and total number of loci (", lociCount, ")",
            call. = TRUE)
@@ -4319,6 +4316,7 @@ amSimilarityScore <-
 
     ## Determine allele similarity score, fastest version + counting NA after comparison
     for (i in 1:numFocalGenotypes) {
+
       # Compare the current row in focalGenotype with all rows in comparisonGenotypes:
       focalGenotypeI<- focalGenotypes[rep(i, numComparisonGenotypes),] # Duplicate row i to compare it with all rows in comparisonGenotypes
       comparedRows  <- focalGenotypeI==comparisonGenotypes # Change to TRUE where both are same, FALSE where different, NA where one or both are NA
@@ -4361,7 +4359,6 @@ amSimilarityScore <-
 
     return(simMatrix)
   }
-
 
 
 #### amLimits() ###
@@ -4489,7 +4486,6 @@ amAddMultilocusMap <-
            call. = TRUE) # This is an internal error from an internal function. Should not happen => TR if it does.
 
     amDatasetIn$multilocusMap <- amFixMultilocusMap(ncol(amDatasetIn$multilocus), multilocusMap)
-    amDatasetIn$lociCount = length(unique(amDatasetIn$multilocusMap)) # Typically alleleCount/2
     class(amDatasetIn) <- c("amDatasset2", "amDataset")
     return(amDatasetIn)
   }
@@ -4540,3 +4536,4 @@ amFixMultilocusMap <- function(ncolData, multilocusMap = NULL, verbose = FALSE) 
   }
   return(multilocusMap)
 }
+
