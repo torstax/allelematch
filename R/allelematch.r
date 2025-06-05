@@ -212,6 +212,7 @@ amDataset <-
       # and adds new fields.
       # We use this trick to maintain compatibility with 2.5.1 -- 2.5.4.
       newDataset$multilocusMap <- amFixMultilocusMap(ncolData, multilocusMap)
+      newDataset$comparableLocusIds <- amGetComparableLocusIds(newDataset$multilocusMap)
       class(newDataset) <- c("amDatasset2", "amDataset")
     }
 
@@ -250,7 +251,7 @@ amMatrix <- function(amDatasetFocal, missingMethod = 2, minComparableLoci=0) {
       multilocusMap <- amDatasetFocal$multilocusMap
       stopifnot(ncol(amDatasetFocal$multilocus) == length(amDatasetFocal$multilocusMap))
     } else {
-      # Defaulted multilocusMap has third precedence:
+      # Defaulted multilocusMap has second precedence:
       multilocusMap <- amFixMultilocusMap(ncol(amDatasetFocal$multilocus), NULL, verbose = FALSE)
     }
   } else {
@@ -4322,35 +4323,37 @@ amSimilarityScore <-
       comparedRows  <- focalGenotypeI==comparisonGenotypes # Change to TRUE where both are same, FALSE where different, NA where one or both are NA
       sumsMatching  <- rowSums(comparedRows, na.rm=TRUE)   # Count the number of TRUE (but not FALSE or NA) in each comparedRow
 
-      if (missingMethod==0) {
-        # How many columns/alleles could be compared without any NA data?
-        sumsComparable  <- rowSums(!is.na(comparedRows)) # Count the number of TRUE and FALSE (but not NA) in each comparedRow.
-        # sumsComparableOk<- as.double(sumsComparable >= minComparableLoci)
+      if (minComparableLoci > 0) {
+        # Find the row comparisons that does not have enough comparable loci:
+        uniqueLoci <- unique(multilocusMap)  # Get unique locus id:s
 
-        # sumsMissing     <- rowSums(is.na(comparedRows)) # * missingMultiplier
-        # sumsMatching    <- sumsMatching + (sumsMissing*missingMultiplier)     # Assume positions with missing data to match ...
-        # sumsMatching    <- sumsMatching * sumsComparableOk # ... but disqualify any compared pair that doesn't have enough comparable values
+        badLoci <- sapply(uniqueLoci, function(g) {
+          colsInGroup <- which(multilocusMap == g)  # Get allele columns in the current locus group
 
-        simMatrix[i,]   <- as.double(sumsMatching) / sumsComparable      # Divide the number of matches by the number of comparable alleles (i.e. don't count alleles with missing data)
+          # Check if all values in the group are NA in either `comparisonGenotypes` or `focalGenotypeI`
+          badLociInData <- rowSums(is.na(comparisonGenotypes[, colsInGroup])) == length(colsInGroup)
+          badLociInRef  <- rowSums(is.na(focalGenotypeI[,      colsInGroup])) == length(colsInGroup)
 
-        if (minComparableLoci > 0) {
-          # Disqualify any genotype pair comparison that doesn't have enough comparable values:
-          simMatrix[i,] <- replace(simMatrix[i,], sumsComparable < minComparableAlleles, 0)
-        }
+          rowSums(badLociInData | badLociInRef)  # Count rows where either condition is met
+        })
+
+        stopifnot(length(badLoci) == numComparisonGenotypes)
+
+        # Convert to number of comparable loci:
+        comparableLoci = length(uniqueLoci) - badLoci
+
+        # TRUE for comparisons that have enough comparable loci:
+        areComparable = comparableLoci >= minComparableLoci
       } else {
-        # Calculate the similarity of comparisons with missing values:
-        if (missingMethod==1) missingMultiplier <- 0.25 else missingMultiplier <- 0.5
-        sumsMissing     <- rowSums(is.na(comparisonGenotypes) * missingMultiplier) + sum(is.na(focalGenotypes[i,]) * missingMultiplier)
-
-        simMatrix[i,]   <- as.double(sumsMatching + sumsMissing) / alleleCount
-
-        if (minComparableLoci > 0) {
-          # Disqualify any genotype pair comparison that doesn't have enough comparable values:
-          sumsComparable  <- rowSums(!is.na(comparedRows)) # Count the number of TRUE and FALSE (but not NA) in each comparedRow.
-          simMatrix[i,] <- replace(simMatrix[i,], sumsComparable < minComparableAlleles, 0) # TODO: THIS IS WRONG!!
-        }
+        # We don't bother about minComparableLoci:
+        areComparable = rep(TRUE, numComparisonGenotypes)
       }
 
+      # Calculate the similarity of comparisons with missing values:
+      if (missingMethod==1) missingMultiplier <- 0.25 else missingMultiplier <- 0.5
+      sumsMissing     <- rowSums(is.na(comparisonGenotypes) * missingMultiplier) + sum(is.na(focalGenotypes[i,]) * missingMultiplier)
+
+      simMatrix[i,]   <- as.double(sumsMatching + sumsMissing) * areComparable / alleleCount
     }
 
     endTime <- Sys.time()
@@ -4359,6 +4362,129 @@ amSimilarityScore <-
 
     return(simMatrix)
   }
+
+
+##### amCountComparableLoci ###
+## For internal use. A locus can be compared between two genotypes if both of
+## them have at least one allele that does not have NA data.
+##
+## For example: locus LOC2 consists of two alleles, LOC2a and LOC2b.
+## Each allele's data is stored in a its own column.
+##  - If both genotypes contain NA data for both LOC2a and LOC2b, then locus LOC2 is not comparable.
+##  - If one of the genotypes contain NA data for both LOC2a and LOC2b, then locus LOC2 is not comparable.
+##  - Otherwise they two genotypes are comparable with regards to the locus LOC2.
+##
+## Single-allele loci (typically gender) is a special case and are not counted.
+##
+## Value:Returns the number of comparable loci for each comparisonGenotypes
+## as a vector of integer with the same length as comparisonGenotypes.
+##
+## TODO: Optimize using e.g. "data.table" that allows modification without copying,
+## TODO: or use sapply
+amCountComparableLoci <- function(
+    comparisonGenotypes,
+    focalGenotypeI,
+    multilocusMap) {
+    # comparisonGenotypes = t(data.frame( A = c( NA, NA,"X","Z"),
+    #                                     B = c("X", NA,"X","Z"),
+    #                                     C = c("X","Y","X","Z"))),
+    # focalGenotypeI = t(data.frame(      F = c( NA, NA,"X","Z"))),
+    # multilocusMap = c(1,1,2,2) ) {
+  stopifnot(ncol(comparisonGenotypes) == ncol(focalGenotypeI))
+  stopifnot(ncol(comparisonGenotypes) == length(multilocusMap))
+  stopifnot(names(comparisonGenotypes) == names(focalGenotypeI))
+
+  if (TRUE) {
+    # Include all loci, even those with just one allele (typically a gender loci)
+    locusIds = unique(multilocusMap) # Get unique locus id:s
+  } else {
+    # Drop the loci with only one allele (typically the gender loci), keep one copy the remaining locus Ids:
+    alleleCountsByLociId = table(multilocusMap) # Count the number of alleles in each locus
+    repeadedLocusIds     = names(alleleCountsByLociId[alleleCountsByLociId > 1])
+    locusIds = repeadedLocusIds
+  }
+  sumsComparableLoci = c(rep(0,length.out = nrow(comparisonGenotypes))) # Accumulator for the comparable loci
+
+#  uniqueLocusIds <- unique(multilocusMap)  # Get unique locus id:s
+#  sumsComparableLoci <- sapply(uniqueLocusIds, function(id) {
+#
+#  sumsComparableLoci <- sapply(locusIds, function(id) {
+#
+  for (id in locusIds) {
+      cols_in_group <- which(multilocusMap == id)  # Get the group of allele columns that share the same locus id
+
+    # Check if all values in the group are NA in either `comparisonGenotypes` or `focalGenotypeI`
+    # all_na_in_data <- is.na(comparisonGenotypes[, cols_in_group]) == cols_in_group
+    # all_na_in_ref  <- is.na(focalGenotypeI[cols_in_group]) == cols_in_group
+    # for(r in 1:nrow(all_na_in_data)) {
+    #   all_na_in_data[r, ] <- all_na_in_data[r, ] | all_na_in_ref
+    # }
+    # comparableLoci = rowSums(!all_na_in_data)
+
+    all_na_in_data <- rowSums(is.na(comparisonGenotypes[, cols_in_group])) == length(cols_in_group)
+    all_na_in_ref  <- sum(is.na(focalGenotypeI[cols_in_group])) == length(cols_in_group)
+
+    stopifnot(length(all_na_in_data) == nrow(comparisonGenotypes)) # One per sample
+    stopifnot(length(all_na_in_ref)  == 1)
+
+    incomparable_locus <- all_na_in_data | all_na_in_ref
+    stopifnot(length(incomparable_locus) == nrow(comparisonGenotypes)) # One per sample
+
+    isLocusComparable <- as.integer(!incomparable_locus) # 0 or 1
+    stopifnot(length(isLocusComparable) == nrow(comparisonGenotypes)) # One per sample
+    stopifnot(length(isLocusComparable) == length(sumsComparableLoci))
+
+    sumsComparableLoci <- sumsComparableLoci + isLocusComparable
+
+
+    # nrow_data <- length(all_na_in_data)
+    # for(r in 1:nrow_data) {
+    #   all_na_in_data[r, ] <- all_na_in_data[r, ] | all_na_in_ref
+    # }
+    # comparableLoci = rowSums(!all_na_in_data)
+
+
+    ##all_na_in_ref  <- matrix(rep(all_na_in_ref, each = nrow(all_na_in_data)))
+    ##incomparable   <-
+
+    # View(isLocusComparable) # Vector with one entry per sample
+  }#)
+
+  return(sumsComparableLoci)
+}
+
+
+##### amGetComparableLociIds ###
+## For internal use. A locus can be compared between two genotypes if both of
+## them have at least one allele that does not have NA data.
+##
+## For example: locus LOC2 consists of two alleles, LOC2a and LOC2b.
+## Each allele's data is stored in a its own column.
+##  - If both genotypes contain NA data for both LOC2a and LOC2b, then locus LOC2 is not comparable.
+##  - If one of the genotypes contain NA data for both LOC2a and LOC2b, then locus LOC2 is not comparable.
+##  - Otherwise they two genotypes are comparable with regards to the locus LOC2.
+##
+## Single-allele loci (typically gender) is a special case and are not counted.
+##
+# amCountComparableLoci <- function(comparisonGenotypes, focalGenotypeI, multilocusMap) {
+#   # Drop the loci with only one allele (typically the gender loci), keep one copy the remaining locus Ids:
+#   alleleCountsByLociId = table(multilocusMap) # Count the number of alleles in each locus
+#   repeadedLocusIds     = names(alleleCountsByLociId[alleleCountsByLociId > 1])
+#
+#   #  uniqueLocusIds <- unique(multilocusMap)  # Get unique locus id:s
+#   #  sumsComparableLoci <- sapply(uniqueLocusIds, function(id) {
+#   sumsComparableLoci <- sapply(repeadedLocusIds, function(id) {
+#     cols_in_group <- which(multilocusMap == id)  # Get the group of allele columns that share the same locus id
+#
+#     # Check if all values in the group are NA in either `comparisonGenotypes` or `focalGenotypeI`
+#     all_na_in_data <- rowSums(is.na(comparisonGenotypes[, cols_in_group])) == length(cols_in_group)
+#     all_na_in_ref <- sum(is.na(focalGenotypeI[cols_in_group])) == length(cols_in_group)
+#
+#     sum(all_na_in_data | all_na_in_ref)  # Count rows where either condition is met
+#   })
+#
+#   return(sumsComparableLoci)
+# }
 
 
 #### amLimits() ###
@@ -4486,6 +4612,7 @@ amAddMultilocusMap <-
            call. = TRUE) # This is an internal error from an internal function. Should not happen => TR if it does.
 
     amDatasetIn$multilocusMap <- amFixMultilocusMap(ncol(amDatasetIn$multilocus), multilocusMap)
+    amDatasetIn$comparableLocusIds <- amGetComparableLocusIds(amDatasetIn$multilocusMap)
     class(amDatasetIn) <- c("amDatasset2", "amDataset")
     return(amDatasetIn)
   }
@@ -4537,3 +4664,19 @@ amFixMultilocusMap <- function(ncolData, multilocusMap = NULL, verbose = FALSE) 
   return(multilocusMap)
 }
 
+
+#### amGetComparableLocusIds() ##
+##
+## Internal utility function  called from many places.
+## Checks and normalizes a multilocusMap parameter.
+amGetComparableLocusIds <- function(multilocusMap) {
+  # Count the number of alleles in each locus (typically 2)
+  alleleCountsByLociId = table(multilocusMap)
+
+  # List the found locus Ids with one entry per Id.
+  # But drop the loci with just one allele (typically the gender loci).
+  # This list will be used when counting the comparablLoci when comparing two
+  # genotype samples:
+  comparableLocusIds   = names(alleleCountsByLociId[alleleCountsByLociId > 1])
+  return(comparableLocusIds)
+}
