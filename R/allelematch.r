@@ -41,13 +41,43 @@ amDataset <-
            ignoreColumn = NULL,
            multilocusMap = NULL) {
     ## Create amDataset object
-    newDataset <- list()
-    class(newDataset) <- "amDataset"
+    if (inherits(multilocusDataset, "amDataset"))
+    {
+      if (isTRUE(class(multilocusDataset) == "amDataset")) {
+        # Clone the amDataset in the dataset parameter.
+        newDataset <- multilocusDataset
+      } else {
+        # This is an object that inherits from amDataset.
+        # Only copy the members of a amDataSet:
+        newDataset <- list()
+        class(newDataset) <- "amDataset"
+
+        newDataset$multilocus    <- multilocusDataset$multilocus
+        newDataset$missingCode   <- multilocusDataset$missingCode
+        newDataset$index         <- multilocusDataset$index
+        newDataset$metaData      <- multilocusDataset$metaData
+        newDataset$multilocusMap <- multilocusDataset$multilocusMap
+      }
+
+      # Allow adding or changing the multilocusMap in the clone:
+      if (!is.null(multilocusMap))
+        newDataset$multilocusMap <- amFixMultilocusMap(ncol(newDataset$multilocus),
+                                                       multilocusMap = multilocusMap)
+      return(newDataset)
+    } else {
+      # This is a new amDataset, not a clone.
+      # Check the dataset parameter:
+      if (is.null(dim(multilocusDataset)))
+        stop("allelematch:  multilocusDataset must be a matrix or a data.frame",
+             call. = FALSE)
+
+      # Prepare to build the amDataset from the individual parameters
+      # to this function:
+      newDataset <- list()
+      class(newDataset) <- "amDataset"
+    }
 
     ## Check function call variables for validity
-    if (is.null(dim(multilocusDataset)))
-      stop("allelematch:  multilocusDataset must be a matrix or a data.frame",
-           call. = FALSE)
     if ((
       is.character(indexColumn) ||
       is.character(metaDataColumn) ||
@@ -497,6 +527,8 @@ amPairwise <-
     amPairwise <- list()
     amPairwise$pairwise <- pairwiseMatches
     amPairwise$missingCode <- amDatasetFocal$missingCode
+    if (!is.null(amDatasetFocal$multilocusMap))
+      amPairwise$multilocusMap <- amDatasetFocal$multilocusMap
     amPairwise$matchThreshold <- lim$matchThreshold
     amPairwise$alleleMismatch <- lim$alleleMismatch
     if (minComparableLoci != 0)
@@ -558,7 +590,7 @@ summary.amPairwise <- function(object,
         object$missingMethod,
         "\n",
         sep = "")
-    if (!is.null(object$minComparableLoci)) cat(
+    if (!is.null(object$minComparableLoci) && object$minComparableLoci > 0) cat(
       "minComparableLoci (required for a match): ",
       object$minComparableLoci,
       "\n",
@@ -666,6 +698,7 @@ amCluster <-
       amDatasetFocal$metaData <- reClass$metaData
       amDatasetFocal$multilocus <- reClass$multilocus
       amDatasetFocal$missingCode <- reClass$missingCode
+      amDatasetFocal$multilocusMap <- reClass$multilocusMap
       class(amDatasetFocal) <- "amDataset"
     }
 
@@ -1142,8 +1175,11 @@ amCluster <-
         clusterAnalysis$unique$uniqueType[orderUnique]
       clusterAnalysis$unique$missingCode <-
         amDatasetFocal$missingCode
+      clusterAnalysis$unique$multilocusMap <-
+        amDatasetFocal$multilocusMap
       class(clusterAnalysis$unique) <- "amDataset"
 
+      clusterAnalysis$cutHeight <- minComparableLoci
       clusterAnalysis$cutHeight <- cutHeight
       clusterAnalysis$consensusMethod <- consensusMethod
       clusterAnalysis$missingMethod <- missingMethod
@@ -1238,6 +1274,11 @@ summary.amCluster <- function(object,
         object$clusterMethod,
         "\n",
         sep = "")
+    if (!is.null(object$minComparableLoci))
+      cat("(minComparableLoci): ",
+          object$minComparableLoci,
+          "\n",
+          sep = "")
     cat("Dynamic tree cutting height (cutHeight): ",
         object$cutHeight,
         "\n\n",
@@ -2720,7 +2761,7 @@ amHTML.amCluster <-
       append = TRUE
     )
 
-    headerHTML <-  matrix("", 12, 2)
+    headerHTML <-  matrix("", 13, 2)
     headerHTML[1,] <- c("\nFocal dataset N=", x$focalDatasetN)
 
     if (inherits(x, "amCluster")) {
@@ -2731,23 +2772,23 @@ amHTML.amCluster <-
         c("unique (singletons) N=", length(x$singletons))
       headerHTML[5, ] <-
         c("missing data represented by: ", x$missingCode)
-      # headerHTML[6, ] <-  # TODO Enter this into the HTML!
-      #   c("min number of comparable loci to match: ", x$minComparableLoci)
       headerHTML[6, ] <-
-        c("missing data matching method: ", x$missingMethod)
+        c("minComparableLoci: ", ifelse(is.null(x$minComparableLoci), 0, x$minComparableLoci)) # TODO
       headerHTML[7, ] <-
-        c("clustered genotypes consensus method: ", x$consensusMethod)
+        c("missing data matching method: ", x$missingMethod)
       headerHTML[8, ] <-
-        c("hierarchical clustering method: ", x$clusterMethod)
+        c("clustered genotypes consensus method: ", x$consensusMethod)
       headerHTML[9, ] <-
+        c("hierarchical clustering method: ", x$clusterMethod)
+      headerHTML[10, ] <-
         c(
           "cutHeight (d-hat; dynamic tree cutting height): ",
           format(x$cutHeight, scientific = FALSE)
         )
-      headerHTML[10, ] <-
+      headerHTML[11, ] <-
         c("run until only singletons: ", x$runUntilSingletons)
-      headerHTML[11, ] <- c("runs: ", x$totalRuns)
-      headerHTML[12, ] <- c("summary generated: ", date())
+      headerHTML[12, ] <- c("runs: ", x$totalRuns)
+      headerHTML[13, ] <- c("summary generated: ", date())
     }
 
     cat(apply(headerHTML, 1, function(x)
