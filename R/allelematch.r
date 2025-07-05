@@ -34,6 +34,7 @@
 
 #### amDataset() ####
 amDataset <-
+
   function(multilocusDataset,
            missingCode = "-99",
            indexColumn = NULL,
@@ -43,6 +44,9 @@ amDataset <-
     ## Create amDataset object
     if (inherits(multilocusDataset, "amDataset"))
     {
+      ## This an existing amDataset to be cloned.
+      ## Here we rely on R’s “copy‐on‐write” semantics not to make a copy of the member variables.
+      ## This makes the cloning a very cheap operation regardless of the size of amDatasetIn$multilocus.
       if (isTRUE(class(multilocusDataset) == "amDataset")) {
         # Clone the amDataset in the dataset parameter.
         newDataset <- multilocusDataset
@@ -61,8 +65,15 @@ amDataset <-
 
       # Allow adding or changing the lociMap in the clone:
       if (!is.null(lociMap))
-        newDataset$lociMap <- amFixMultilocusMap(ncol(newDataset$multilocus),
-                                                       lociMap = lociMap)
+        newDataset <- amAddLociMap(newDataset, lociMap = lociMap)
+
+      # # TODO: Consider allowing more parameter to change the clone later.
+      # params <- list(missingCode, indexColumn, metaDataColumn, ignoreColumn)
+      # if (any(!vapply(params, is.null, logical(1)))) {
+      #   stop("allelematch:  Sorry, amDataset does not yet support modifying a clone by also passing other parameters (except for lociMap)",
+      #        call. = FALSE)
+      # }
+
       return(newDataset)
     } else {
       # This is a new amDataset, not a clone.
@@ -243,7 +254,7 @@ amDataset <-
     } else {
       # We add the lociMap as a new field.
       # We use this trick to maintain compatibility with allelematch 2.5.1 -- 2.5.4.
-      newDataset$lociMap <- amFixMultilocusMap(ncolData, lociMap)
+      newDataset <- amAddLociMap(newDataset, lociMap=lociMap, need=TRUE)
       # newDataset$comparableLocusIds <- amGetComparableLocusIds(newDataset$lociMap)
     }
 
@@ -252,8 +263,13 @@ amDataset <-
 
 
 #### print.amDataset() ####
-print.amDataset <- function(x, ...) {
+print.amDataset <- function(x, verbose=FALSE, ...) {
   cat("allelematch\namDataset object\n")
+  if (verbose) {
+    lociStr <- format(x$lociMap, sep=", ")
+    cat("   MissingCode: ", x$missingCode,
+      "\n   lociMap    : (", sep="") ; cat(lociStr, sep=", ") ; cat(")\n", sep="")
+  }
   if (!is.null(x$metaData)) {
     xPretty <- paste(format(x$index), format(x$metaData), sep = "  ")
   } else {
@@ -277,24 +293,21 @@ amMatrix <- function(amDatasetFocal, missingMethod = 2, minComparableLoci=0) {
 
   if (minComparableLoci > 0) {
     # We need a lociMap to go with the new param minComparableLoci
-    lociMap <- amFixMultilocusMap(ncol(amDatasetFocal$multilocus),
-                                        amDatasetFocal$lociMap,
-                                        verbose = FALSE)
+    amDatasetFocal <- amAddLociMap(amDatasetFocal, TRUE)
   } else {
     # For backwards compatibility reasons we won't guess
     # regarding default lociMap until we really need it:
-    lociMap <- NULL
   }
+  lociMap <- amDatasetFocal$lociMap
 
   ## Create variables from amDatasetFocal object
-  numGenotypes <- nrow(amDatasetFocal$multilocus)
   genotypes <- amDatasetFocal$multilocus
   ## Set missing data to NA for convenience
   genotypes[genotypes == amDatasetFocal$missingCode] <- NA
 
   ## Determine allele similarity score
   simMatrix <- amSimilarityScore(
-    genotypes,
+    amDatasetFocal,
     lociMap=lociMap,
     minComparableLoci=minComparableLoci,
     missingMethod=missingMethod)
@@ -383,20 +396,20 @@ amPairwise <-
 
     ## Get hold of the lociMap:
     if (minComparableLoci != 0) {
-      lociMap <- amFixMultilocusMap(ncol(focalGenotypes),
-                                          amDatasetFocal$lociMap,
-                                          amDatasetComparison$lociMap)
+      amDatasetFocal      <- amAddLociMap(amDatasetFocal,      lociMap = TRUE)
+      amDatasetComparison <- amAddLociMap(amDatasetComparison, lociMap = TRUE)
     } else {
       # For backwards compatibility reasons we won't guess
       # regarding default lociMap until we really need it:
       lociMap <- NULL
     }
+    lociMap <- amDatasetFocal$lociMap
 
     ## Determine allele similarity score
     simMatrix <-
-      amSimilarityScore(focalGenotypes,
-                        comparisonGenotypes,
-                        lociMap=lociMap,
+      amSimilarityScore(amDatasetFocal, # TODO: Make use of "copy-on-write" to pass amDataset:s instead!
+                        amDatasetComparison,
+                        lociMap=NULL,
                         minComparableLoci=minComparableLoci,
                         missingMethod=missingMethod)
 
@@ -692,14 +705,17 @@ amCluster <-
     }
 
     if (inherits(amDatasetFocal, "amInterpolate")) { # TODO: this class is never set. Not in 2.5.4 either.
-      reClass <- amDatasetFocal
-      amDatasetFocal <- list()
-      amDatasetFocal$index <- reClass$index
-      amDatasetFocal$metaData <- reClass$metaData
-      amDatasetFocal$multilocus <- reClass$multilocus
-      amDatasetFocal$missingCode <- reClass$missingCode
-      amDatasetFocal$lociMap <- reClass$lociMap
-      class(amDatasetFocal) <- "amDataset"
+      # reClass <- amDatasetFocal
+      # amDatasetFocal <- list()
+      # amDatasetFocal$index <- reClass$index
+      # amDatasetFocal$metaData <- reClass$metaData
+      # amDatasetFocal$multilocus <- reClass$multilocus
+      # amDatasetFocal$missingCode <- reClass$missingCode
+      # amDatasetFocal$lociMap <- reClass$lociMap
+      # class(amDatasetFocal) <- "amDataset"
+
+      # Re-classify amDatasetFocal:
+      amDatasetFocal <- amDataset(amDatasetFocal)
     }
 
     originalFocalDatasetN <- nrow(amDatasetFocal$multilocus)
@@ -1171,12 +1187,12 @@ amCluster <-
         clusterAnalysis$unique$metaData[orderUnique]
       clusterAnalysis$unique$multilocus <-
         clusterAnalysis$unique$multilocus[orderUnique, ]
-      clusterAnalysis$unique$uniqueType <-
+      clusterAnalysis$unique$uniqueType <- # NB: Not part of amDataset.
         clusterAnalysis$unique$uniqueType[orderUnique]
       clusterAnalysis$unique$missingCode <-
         amDatasetFocal$missingCode
-      #clusterAnalysis$unique$lociMap <-
-        #amDatasetFocal$lociMap
+      clusterAnalysis$unique$lociMap <-
+        amDatasetFocal$lociMap
       class(clusterAnalysis$unique) <- "amDataset"
 
       if (isTRUE(minComparableLoci > 0)) # For 2.5.4 backwards compatibility
@@ -1276,7 +1292,7 @@ summary.amCluster <- function(object,
         "\n",
         sep = "")
     if (!is.null(object$minComparableLoci))
-      cat("(minComparableLoci): ",
+      cat("Limit on NA loci (minComparableLoci): ", # TODO: Rephrase! How?
           object$minComparableLoci,
           "\n",
           sep = "")
@@ -1444,14 +1460,12 @@ amAlleleFreq <- function(amDatasetFocal, multilocusMap = NULL, lociMap = multilo
          call. = FALSE)
   }
 
-  ## Set lociMap to default if not given
-  lociMap <- amFixMultilocusMap(ncol(amDatasetFocal$multilocus),
-                                     lociMap,
-                                     amDatasetFocal$lociMap,
-                                     verbose = TRUE)
+  ## Set lociMap to default if not given. We need it when calculating alleleFreq:
+  amDatasetFocal <- amAddLociMap(amDatasetFocal, lociMap=lociMap, need=TRUE, verbose = TRUE)
+  lociMap <- multilocusMap <- amDatasetFocal$lociMap
 
   alleleFreq <- list()
-  alleleFreq$multilocusMap <- lociMap # TODO: Replace multilocusMap with lociMap when we drop 2.5.4 compatibility!
+  alleleFreq$multilocusMap <- lociMap # TODO: Replace $multilocusMap with $lociMap when we drop 2.5.4 compatibility!
   alleleFreq$loci <- vector("list", max(lociMap))
   ## Determine allele frequencies for each locus
   for (locus in 1:max(lociMap)) {
@@ -1527,10 +1541,12 @@ amUnique <-
 
     ## Check and set lociMap to default if not given
     if (minComparableLoci > 0 || !is.null(lociMap) ) {
-      lociMap <- amFixMultilocusMap(ncol(amDatasetFocal$multilocus),
-                                          lociMap,
-                                          amDatasetFocal$lociMap,
-                                          verbose = TRUE) # TODO verbose for 2.5.4 compatibility
+      # We need a lociMap to be able to count comparable loci:
+      amDatasetFocal <- amAddLociMap(amDatasetFocal,
+                                     lociMap=lociMap,
+                                     need=TRUE,
+                                     verbose = TRUE) # TODO verbose for 2.5.4 compatibility
+      lociMap <- multilocusMap <- amDatasetFocal$LociMap
     }
 
     # Validate and calculate limit parameters:
@@ -1772,10 +1788,11 @@ amUniqueProfile <-
 
     ## Check and set lociMap to default if not given
     ## (Needed below regardless of minComparableLoci)
-    lociMap <- amFixMultilocusMap(ncol(amDatasetFocal$multilocus),
-                                        lociMap,
-                                        amDatasetFocal$lociMap,
-                                        verbose = TRUE) # TODO verbose for 2.5.4 compatibility
+    amDatasetFocal <- amAddLociMap(amDatasetFocal,
+                                   lociMap = lociMap,
+                                   need=TRUE,
+                                   verbose = TRUE) # verbose=TRUE for 2.5.4 compatibility
+    lociMap <- multilocusMap <- amDatasetFocal$lociMap
     stopifnot(!is.na(lociMap),
               !is.null(lociMap),
               length(lociMap) == ncol(amDatasetFocal$multilocus))
@@ -4344,13 +4361,23 @@ amCSV.amUnique <- function(x, csvFile, uniqueOnly = FALSE) {
 ##  that is described in chapter 2.1, page 3, step 1 of the vignette at
 ##  https://cran.r-project.org/web/packages/allelematch/vignettes/allelematchSuppDoc.pdf
 ##
-amSimilarityScore <-
-  function(focalGenotypes, # Not an amDataset. Just the amDataset$multilocus raw data
-           comparisonGenotypes=focalGenotypes,
+amSimilarityScore <- # TODO: Rewrite to take amDataset:s as two first parameters!
+  function(amDatasetFocal,
+           amDatasetComparison=amDatasetFocal,
            lociMap = NULL,
            minComparableLoci = 0,
            missingMethod=2) {
     startTime <- Sys.time() # This method is a hot-spot. Measure how log it takes to execute.
+
+    # "copy-on-write" makes this a very cheap operation:
+    focalGenotypes      <- amDatasetFocal$multilocus
+    comparisonGenotypes <- amDatasetComparison$multilocus
+
+    ## Set missingCodes to NA
+    focalGenotypes[focalGenotypes == amDatasetFocal$missingCode] <-
+      NA
+    comparisonGenotypes[comparisonGenotypes == amDatasetComparison$missingCode] <-
+      NA
 
     # Assert that the parameters have been vetted
     # in the exported interface functions
@@ -4360,9 +4387,16 @@ amSimilarityScore <-
     stopifnot(missingMethod == 1 || missingMethod == 2)
 
     ## Check and set lociMap to default if not given
-    if (minComparableLoci > 0 || !is.null(lociMap) ) {
-      lociMap <- amFixMultilocusMap(ncol(focalGenotypes), lociMap)
+    if (minComparableLoci > 0) {
+      # We must have a lociMap to be able to count comparable loci.
+      # If we don't have it, attempt to use the '2 alleles per loci' default:
+      lociMap <- amFixLociMap(ncol(amDatasetFocal$multilocus),
+                               lociMap=lociMap,
+                               lociMap2=amDatasetFocal$lociMap,
+                               need=TRUE)
+
       stopifnot(length(lociMap) == ncol(focalGenotypes))
+      stopifnot(length(lociMap) == ncol(comparisonGenotypes))
 
       # Group the alleles into the loci they share:
       uniqueLoci = unique(lociMap)
@@ -4682,53 +4716,70 @@ amLimits <-
   }
 
 
-#### amAddMultilocusMap() ##
+#### amAddLociMap() ##
 ##
 ## Internal utility function  called from many places.
 ##
 ## Allow a function that takes a lociMap parameter to add that to a copy of an amDataset.
 ##
+## Here we rely on R’s “copy‐on‐write” semantics not to make a copy of the other members.
+## This makes the following a very cheap operation regardless of the size of amDatasetIn$multilocus:
+##
+##    bigAmDataset <- amAddLociMap(bigAmDataset, lociMap = TRUE)
+##
 ## Not recommended but allowed in order to maintain backward compatibility with
 ## 2.5.1 .. 2.5.4 of allelematch. Is very costly when there are many allele data columns.
 ##
 ## Recommended is to add the lociMap when creating the amDataset object.
-amAddMultilocusMap <-
-  function(amDatasetIn,
-           lociMap) {
+amAddLociMap <- function(x, lociMap=NULL, need = FALSE, verbose = FALSE) {
 
-    if (!inherits(amDatasetIn, "amDataSet"))
-      stop("allelematch:  Parameter amDatasetIn is not of class amDataset",
-           call. = TRUE) # This is an internal error from an internal function. Should not happen => TR if it does.
+  if (!inherits(x, "amDataset"))
+    stop("allelematch:  Parameter x to 'amAddLociMap()' is not of class amDataset",
+         call. = TRUE) # This is an internal error from an internal function. Should not happen => TR if it does.
 
-    if (!is.null(amDatasetIn$lociMap)) #  inherits(amDatasetIn, "amDataSet2"))
-      stop("allelematch:  parameter amDatasetIn already has a lociMap. Adding it again is very wastefull",
-           call. = TRUE) # This is an internal error from an internal function. Should not happen => TR if it does.
-
-    amDatasetIn$lociMap <- amFixMultilocusMap(ncol(amDatasetIn$multilocus), lociMap)
-    # amDatasetIn$comparableLocusIds <- amGetComparableLocusIds(amDatasetIn$lociMap)
-    return(amDatasetIn)
+  # Preffer existing x$lociMap:
+  if(!is.null(x$lociMap)) {
+    return(x)
   }
 
-#### amFixMultilocusMap() ##
-##
-## Internal utility function  called from many places.
-## Checks and normalizes a lociMap parameter
-## and/or a lociMap member variable from an amDataset
-amFixMultilocusMap <- function(ncolData, lociMap = NULL, lociMap2 = NULL, verbose = FALSE) {
+  if(is.null(lociMap)) {
+    if(isTRUE(verbose)) {} # A good place for a breakpoint
+  }
 
-  # The user is allowed to supply TRUE to request a default,
-  # i.e. a lociMap with 2 alleles per locus:
-  if (isTRUE(lociMap)) lociMap <- NULL
+  x$lociMap <- amFixLociMap(ncol(x$multilocus), lociMap=lociMap, need=need, verbose=verbose)
+  # x$comparableLocusIds <- amGetComparableLocusIds(x$lociMap)
+  return(x)
+}
+
+amFixLociMap <- function(ncolData, lociMap = NULL, lociMap2 = NULL, need=FALSE, verbose = FALSE) {
+
+  # This is the way for a user without a lociMap to control
+  # if an attempt should be made to generate one:
+  # Internal code would typically pass two lociMap:s, one in a amDataset,
+  # and would use the parameter 'need' if a lociMap is really needed).
+#  if (!is.na(lociMap) && is.logical(lociMap) && length(lociMap) == 1) { # Fails for c(1,1, ...)
+  if (isTRUE(lociMap) || isFALSE(lociMap)) {
+    need    <- lociMap
+    lociMap <- NULL
+  }
 
   # Should we use the parameter (lociMap) or the value from the amDataset (lociMap2)?
-  if (is.null(lociMap) && !is.null(lociMap2)) {
+  # Let the lociMap2 from the amDataset have precedence if set.
+  if (!is.null(lociMap2)) {
     lociMap <- lociMap2
   }
 
   if (is.null(lociMap)) {
-    # The caller want's the default map, i.e. two alleles for each loci:
+    # For backwards compatibility reasons, we only use the below code to guess
+    # a default if it is really needed:
+    if (isFALSE(need)) return(NULL)
+
+    # We need a lociMap, but don' have any.
+    # See if we can generate the default map, i.e. two alleles for each loci:
     if ((ncolData %% 2) != 0) {
-      stop( # TODO : Replace 'multilocusMap' with 'lociMap' when we skip backwards compatibility with 2.5.4!
+      # TODO : Replace 'multilocusMap' with 'lociMap' in the stop message below
+      #        when we skip backwards compatibility with 2.5.4!
+            stop(
         "allelematch:  there are an odd number of genotype columns in amDatasetFocal; Please specify multilocusMap manually",
         call. = FALSE
       )
@@ -4742,7 +4793,8 @@ amFixMultilocusMap <- function(ncolData, lociMap = NULL, lociMap2 = NULL, verbos
     lociMap <- rep(1:(ncolData / 2), each = 2)
     lociMap <- as.integer(as.factor(lociMap))
   } else {
-    # The lociMap is caller defined.
+    # The lociMap is caller defined; Either as a parameter to the amDataset or another call.
+    # Validate in the same way regardless:
     if (length(lociMap) != ncolData)  { ## Check lociMap is the correct length
       stop(
         "allelematch:  multilocusMap must be a vector of integers or strings giving the mappings onto loci for all genotype columns in amDatasetFocal;
@@ -4756,7 +4808,7 @@ amFixMultilocusMap <- function(ncolData, lociMap = NULL, lociMap2 = NULL, verbos
         call. = FALSE
       )
     }
-    lociMap <- as.integer(as.factor(lociMap))
+    lociMap <- as.integer(as.factor(lociMap)) # TODO: Consider storing the lociMap as is, not converting it.
   }
   return(lociMap)
 }
