@@ -67,7 +67,7 @@ amDataset <-
       if (!is.null(lociMap))
         newDataset <- amAddLociMap(newDataset, lociMap = lociMap)
 
-      # # TODO: Consider allowing more parameter to change the clone later.
+      # # TODO: Consider allowing more parameters to change the clone later.
       # params <- list(missingCode, indexColumn, metaDataColumn, ignoreColumn)
       # if (any(!vapply(params, is.null, logical(1)))) {
       #   stop("allelematch:  Sorry, amDataset does not yet support modifying a clone by also passing other parameters (except for lociMap)",
@@ -248,14 +248,9 @@ amDataset <-
     # Set lociMap if given:
     if (is.null(lociMap)) {
       # Refrain from setting the member variable newDataset$lociMap
-      # for backwards compatibility reasons.
-      # An attempt to read a amdataset$lociMap will result in NULL
-      # anyway.
+      # until requested for backwards compatibility with allelematch 2.5.1 -- 2.5.4.
     } else {
-      # We add the lociMap as a new field.
-      # We use this trick to maintain compatibility with allelematch 2.5.1 -- 2.5.4.
       newDataset <- amAddLociMap(newDataset, lociMap=lociMap, need=TRUE)
-      # newDataset$comparableLocusIds <- amGetComparableLocusIds(newDataset$lociMap)
     }
 
     return(newDataset)
@@ -704,7 +699,7 @@ amCluster <-
       amDatasetFocal <- amDatasetFocal$unique
     }
 
-    if (inherits(amDatasetFocal, "amInterpolate")) { # TODO: this class is never set. Not in 2.5.4 either.
+    if (inherits(amDatasetFocal, "amInterpolate")) { # TODO: Remove. This class is never set. Not in 2.5.4 either.
       # reClass <- amDatasetFocal
       # amDatasetFocal <- list()
       # amDatasetFocal$index <- reClass$index
@@ -1729,16 +1724,9 @@ amUnique <-
         uniqueAnalysis$multipleMatches$metaData <-
           uniqueAnalysis$multipleMatches$metaData[multipleMatchesDatasetFocal]
       }
-      tmpMultilocus <-
-        matrix(
-          uniqueAnalysis$multipleMatches$multilocus[multipleMatchesDatasetFocal, ],
-          length(indexMultipleMatches),
-          ncol(uniqueAnalysis$multipleMatches$multilocus),
-          byrow = FALSE
-        )
-      dimnames(tmpMultilocus)[[2]] <-
-        dimnames(uniqueAnalysis$multipleMatches$multilocus)[[2]]
-      uniqueAnalysis$multipleMatches$multilocus <- tmpMultilocus
+      tmp <- uniqueAnalysis$multipleMatches$multilocus
+      tmp <- tmp[multipleMatchesDatasetFocal, , drop = FALSE]
+      uniqueAnalysis$multipleMatches$multilocus <- tmp
     }
 
     uniqueAnalysis$unique <- clusterAnalysis$unique
@@ -1793,9 +1781,6 @@ amUniqueProfile <-
                                    need=TRUE,
                                    verbose = TRUE) # verbose=TRUE for 2.5.4 compatibility
     lociMap <- multilocusMap <- amDatasetFocal$lociMap
-    stopifnot(!is.na(lociMap),
-              !is.null(lociMap),
-              length(lociMap) == ncol(amDatasetFocal$multilocus))
 
     ## More checking of input parameters
     if (sum(!(c(
@@ -4346,12 +4331,6 @@ amCSV.amUnique <- function(x, csvFile, uniqueOnly = FALSE) {
 ##
 ## minComparableLoci : If this parameter is set, TODO
 ##
-## missingMethod=0 increases similarity by 0 for any comparisons that does not
-##  compare two valid data (X or Y as opposed to -99 or NA)
-##
-##  The average is then calculated by dividing the accumulated similarity
-##  by the number of allele positions that could be compared
-##  (rather than the total numbers of allele positions)
 ##
 ## missingMethod=1 and missingMethod=2 assigns none-zero similarity to matches that include missing data.
 ##
@@ -4361,7 +4340,7 @@ amCSV.amUnique <- function(x, csvFile, uniqueOnly = FALSE) {
 ##  that is described in chapter 2.1, page 3, step 1 of the vignette at
 ##  https://cran.r-project.org/web/packages/allelematch/vignettes/allelematchSuppDoc.pdf
 ##
-amSimilarityScore <- # TODO: Rewrite to take amDataset:s as two first parameters!
+amSimilarityScore <- 
   function(amDatasetFocal,
            amDatasetComparison=amDatasetFocal,
            lociMap = NULL,
@@ -4382,7 +4361,7 @@ amSimilarityScore <- # TODO: Rewrite to take amDataset:s as two first parameters
     # Assert that the parameters have been vetted
     # in the exported interface functions
     # that call this internal function:
-    stopifnot(ncol(focalGenotypes) == ncol(comparisonGenotypes)) # TODO: Is this allowed?
+    stopifnot(ncol(focalGenotypes) == ncol(comparisonGenotypes))
     stopifnot(minComparableLoci >= 0)
     stopifnot(missingMethod == 1 || missingMethod == 2)
 
@@ -4727,10 +4706,7 @@ amLimits <-
 ##
 ##    bigAmDataset <- amAddLociMap(bigAmDataset, lociMap = TRUE)
 ##
-## Not recommended but allowed in order to maintain backward compatibility with
-## 2.5.1 .. 2.5.4 of allelematch. Is very costly when there are many allele data columns.
-##
-## Recommended is to add the lociMap when creating the amDataset object.
+## Recommended is however to add the lociMap when creating the amDataset object.
 amAddLociMap <- function(x, lociMap=NULL, need = FALSE, verbose = FALSE) {
 
   if (!inherits(x, "amDataset"))
@@ -4742,10 +4718,6 @@ amAddLociMap <- function(x, lociMap=NULL, need = FALSE, verbose = FALSE) {
     return(x)
   }
 
-  if(is.null(lociMap)) {
-    if(isTRUE(verbose)) {} # A good place for a breakpoint
-  }
-
   x$lociMap <- amFixLociMap(ncol(x$multilocus), lociMap=lociMap, need=need, verbose=verbose)
   # x$comparableLocusIds <- amGetComparableLocusIds(x$lociMap)
   return(x)
@@ -4753,11 +4725,8 @@ amAddLociMap <- function(x, lociMap=NULL, need = FALSE, verbose = FALSE) {
 
 amFixLociMap <- function(ncolData, lociMap = NULL, lociMap2 = NULL, need=FALSE, verbose = FALSE) {
 
-  # This is the way for a user without a lociMap to control
-  # if an attempt should be made to generate one:
-  # Internal code would typically pass two lociMap:s, one in a amDataset,
-  # and would use the parameter 'need' if a lociMap is really needed).
-#  if (!is.na(lociMap) && is.logical(lociMap) && length(lociMap) == 1) { # Fails for c(1,1, ...)
+  # Setting lociMap = TRUE  is the same as setting need = TRUE  and locMap = NULL.
+  # Setting lociMap = FALSE is the same as setting need = FALSE and locMap = NULL.
   if (isTRUE(lociMap) || isFALSE(lociMap)) {
     need    <- lociMap
     lociMap <- NULL
