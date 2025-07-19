@@ -4340,7 +4340,7 @@ amCSV.amUnique <- function(x, csvFile, uniqueOnly = FALSE) {
 ##  that is described in chapter 2.1, page 3, step 1 of the vignette at
 ##  https://cran.r-project.org/web/packages/allelematch/vignettes/allelematchSuppDoc.pdf
 ##
-amSimilarityScore <- 
+amSimilarityScore <-
   function(amDatasetFocal,
            amDatasetComparison=amDatasetFocal,
            lociMap = NULL,
@@ -4395,7 +4395,8 @@ amSimilarityScore <-
     }
 
     ## Empty data structure to store results
-    simMatrix <- matrix(, nrow=numFocalGenotypes, ncol=numComparisonGenotypes)
+    simMatrix <- matrix(, nrow=numFocalGenotypes, ncol=numComparisonGenotypes,
+                        dimnames=list(amDatasetFocal$index, amDatasetComparison$index))
 
     ## Determine allele similarity score, fastest version + counting NA after comparison
     stopifnot(length(dim(focalGenotypes)) == 2)
