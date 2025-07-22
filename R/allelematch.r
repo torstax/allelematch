@@ -4348,58 +4348,62 @@ amSimilarityScore <-
            missingMethod=2) {
     startTime <- Sys.time() # This method is a hot-spot. Measure how log it takes to execute.
 
-    # "copy-on-write" makes this a very cheap operation:
-    focalGenotypes      <- amDatasetFocal$multilocus
-    comparisonGenotypes <- amDatasetComparison$multilocus
+    # Check if we can optimize a bit:
+    isSameData <- (tracemem(amDatasetFocal) == tracemem(amDatasetComparison))
+    untracemem(amDatasetFocal) ;  untracemem(amDatasetComparison)
 
-    ## Set missingCodes to NA
-    focalGenotypes[focalGenotypes == amDatasetFocal$missingCode] <-
-      NA
-    comparisonGenotypes[comparisonGenotypes == amDatasetComparison$missingCode] <-
-      NA
+    ## Check and set lociMap to default if needed and not given
+    if (minComparableLoci != 0 || missingMethod == 0)
+    {
+      amDatasetFocal      <- amAddLociMap(amDatasetFocal, lociMap = lociMap, need = TRUE)
+      lociMap             <- amDatasetFocal$lociMap
+      amDatasetComparison <- amAddLociMap(amDatasetComparison, lociMap = lociMap, need = TRUE)
+    }
+
+    if (missingMethod == 0)
+    {
+      # Set loci where all alleles have missingCode to NA.
+      focalGenotypes  <- amSetIncomparableLociToNA(amDatasetFocal)
+
+      # Fix comparisonGenotypes:
+      if (isSameData) {
+        comparisonGenotypes <- focalGenotypes # Already fixed for focal above.
+      } else {
+        comparisonGenotypes  <- amSetIncomparableLociToNA(amDatasetComparison)
+      }
+    } else {
+      ## missingMethod 1 and 2 don't care about loci, just individual alleles.
+      ## So, set all alleles with missingCode to NA
+      focalGenotypes      <- amDatasetFocal$multilocus
+      focalGenotypes[focalGenotypes == amDatasetFocal$missingCode] <-
+        NA
+
+      comparisonGenotypes <- amDatasetComparison$multilocus
+      comparisonGenotypes[comparisonGenotypes == amDatasetComparison$missingCode] <-
+        NA
+    }
 
     # Assert that the parameters have been vetted
     # in the exported interface functions
     # that call this internal function:
     stopifnot(ncol(focalGenotypes) == ncol(comparisonGenotypes))
+    stopifnot(amDatasetFocal$missingCode == amDatasetComparison$missingCode)
     stopifnot(minComparableLoci >= 0)
-    stopifnot(missingMethod == 1 || missingMethod == 2)
-
-    ## Check and set lociMap to default if not given
-    if (minComparableLoci > 0) {
-      # We must have a lociMap to be able to count comparable loci.
-      # If we don't have it, attempt to use the '2 alleles per loci' default:
-      lociMap <- amFixLociMap(ncol(amDatasetFocal$multilocus),
-                               lociMap=lociMap,
-                               lociMap2=amDatasetFocal$lociMap,
-                               need=TRUE)
-
+    stopifnot(missingMethod == 0 || missingMethod == 1 || missingMethod == 2)
+    stopifnot(length(dim(focalGenotypes)) == 2)
+    if (!is.null(lociMap)) {
       stopifnot(length(lociMap) == ncol(focalGenotypes))
       stopifnot(length(lociMap) == ncol(comparisonGenotypes))
-
-      # Group the alleles into the loci they share:
-      uniqueLoci = unique(lociMap)
-      lociCount = length(uniqueLoci) # Count the number of loci in the map. Typically alleleCount / 2:
-      if (minComparableLoci < 0 || minComparableLoci > lociCount)
-        stop("allelematch:  minComparableLoci must be between 0 and total number of loci (", lociCount, ")",
-             call. = TRUE)
     }
 
     numFocalGenotypes      <- nrow(focalGenotypes)
     numComparisonGenotypes <- nrow(comparisonGenotypes)
-
-    alleleCount <- ncol(focalGenotypes) # Number of alleles to compare
-    if (ncol(focalGenotypes) != ncol(comparisonGenotypes)) {
-      # TODO: Is this allowed?
-      cat("allelematch: amSimilarityScore: Hmm. ncol(focalGenotypes)=", ncol(focalGenotypes), " != ncol(comparisonGenotypes)=", ncol(comparisonGenotypes), sep="")
-    }
 
     ## Empty data structure to store results
     simMatrix <- matrix(, nrow=numFocalGenotypes, ncol=numComparisonGenotypes,
                         dimnames=list(amDatasetFocal$index, amDatasetComparison$index))
 
     ## Determine allele similarity score, fastest version + counting NA after comparison
-    stopifnot(length(dim(focalGenotypes)) == 2)
     for (i in 1:numFocalGenotypes) {
 
       # Compare the current row in focalGenotype with all rows in comparisonGenotypes:
@@ -4408,11 +4412,21 @@ amSimilarityScore <-
       sumsMatching  <- rowSums(comparedRows, na.rm=TRUE)   # Count the number of TRUE (but not FALSE or NA) in each comparedRow
       stopifnot(is.vector(sumsMatching) && length(sumsMatching) == numComparisonGenotypes)
 
-      # Calculate the similarity of comparisons with missing values:
-      if (missingMethod==1) missingMultiplier <- 0.25 else missingMultiplier <- 0.5
-      sumsMissing     <- rowSums(is.na(comparisonGenotypes) * missingMultiplier) + sum(is.na(focalGenotypes[i,]) * missingMultiplier)
+      # Calculate the similarity of comparisons:
+      if (missingMethod == 0) {
+        alleleCounts  <- ncol(comparedRows) - rowSums(is.na(comparedRows))
+        alleleCounts[alleleCounts <= 0] <- 100000 # Can't be 0
+        simMatrix[i,] <- as.double(sumsMatching) / alleleCounts
+      } else {
+        # Backwards compatible calculations:
+        # Calculate the similarity of comparisons with missing values:
 
-      simMatrix[i,]   <- as.double(sumsMatching + sumsMissing) / alleleCount
+        missingMultiplier <- if (missingMethod==1) 0.25 else 0.5
+        sumsMissing   <- rowSums(is.na(comparisonGenotypes) * missingMultiplier) + sum(is.na(focalGenotypes[i,]) * missingMultiplier)
+
+        alleleCount   <- ncol(focalGenotypes) # Number of alleles to compare
+        simMatrix[i,] <- as.double(sumsMatching + sumsMissing) / alleleCount
+      }
 
       if (minComparableLoci > 0) {
         stopifnot(length(dim(comparisonGenotypes)) == 2)
@@ -4426,6 +4440,11 @@ amSimilarityScore <-
 
         badLoci <- sapply(uniqueLoci, simplify = "array", FUN = function(g) {
           colsInGroup <- which(lociMap == g)  # Get allele columns in this locus group
+
+          # Single allele loci (typically gender alleles) are always comparable:
+          if (length(colsInGroup) == 1) {
+            return(badLocus <- matrix(data = FALSE, nrow=numComparisonGenotypes, ncol=1))
+          }
 
           # Check if all values in the group are NA in either `comparisonGenotypes` or `focalGenotypeI`
           badLocusInData <- rowSums(is.na(comparisonGenotypes[, colsInGroup, drop = FALSE])) == length(colsInGroup)
@@ -4461,6 +4480,39 @@ amSimilarityScore <-
 
     return(simMatrix)
   }
+
+
+amSetIncomparableLociToNA <- function(amData)
+{
+  stopifnot(class(amData) == "amDataset")
+
+  genotypes   <- amData$multilocus
+  lociMap     <- amData$lociMap
+  missingCode <- amData$missingCode
+
+  stopifnot(ncol(genotypes) == length(lociMap))
+  stopifnot(!anyNA(genotypes))
+
+  locusIds <- unique(lociMap)  # Get unique locus id:s
+  for (id in locusIds) {
+    cols <- which(lociMap == id)  # Get the group of allele columns that share the same locus id
+
+    # Single allele loci (typically gender alleles) are never incomparable:
+    if (length(cols) == 1) next
+
+    # Select the allele data columns for this locus:
+    locusData  <- genotypes[, cols, drop = FALSE]
+
+    # Build logical mask for the rows where all the columns contain 'missingCode':
+    allMissing <- rowSums(locusData  == missingCode) == ncol(locusData)
+
+    # Set all of these cells to NA:
+    if (any(allMissing)) {
+      genotypes[allMissing, cols] <- NA
+    }
+  }
+  genotypes
+}
 
 
 ##### amCountComparableLoci ###
